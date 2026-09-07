@@ -1,0 +1,17 @@
+{
+    default_sni 47.76.27.88
+}
+
+star.zoomzhao.com {
+    encode gzip
+    reverse_proxy 127.0.0.1:3001
+}
+
+https://47.76.27.88 {
+    tls {
+        issuer acme {
+            profile shortlived
+        }
+    }
+    redir https://star.zoomzhao.com{uri} permanent
+}

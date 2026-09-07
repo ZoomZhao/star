@@ -1,0 +1,92 @@
+export type User = {
+  id: string;
+  family_id: string | null;
+  username: string;
+  name: string;
+  role: 'child' | 'parent' | 'admin';
+  active: number;
+};
+export type Submission = {
+  id: string;
+  task_id: string;
+  child_id: string;
+  status: string;
+  note: string;
+  review_note: string;
+  created_at: string;
+  title: string;
+  stars: number;
+  icon: string;
+  date: string;
+  description: string;
+};
+export type Task = {
+  id: string;
+  date: string;
+  title: string;
+  description: string;
+  icon: string;
+  stars: number;
+  daily_limit: number;
+  approved: number;
+  pending: number;
+  rule_version: number;
+  submissions: Submission[];
+};
+export type Rule = {
+  id: string;
+  rule_key: string;
+  title: string;
+  description: string;
+  icon: string;
+  stars: number;
+  daily_limit: number;
+  schedule: 'daily' | 'weekly' | 'once';
+  weekdays: number[];
+  on_date: string | null;
+  effective_from: string;
+  enabled: number;
+  version: number;
+};
+export type Reward = {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  cost: number;
+  active: number;
+};
+export type Redemption = {
+  id: string;
+  reward_id: string;
+  title: string;
+  icon: string;
+  cost: number;
+  status: string;
+  review_note: string;
+  created_at: string;
+};
+export type Entry = {
+  id: string;
+  amount: number;
+  kind: string;
+  title: string;
+  note: string;
+  date: string;
+  created_at: string;
+  reversed_by: string | null;
+};
+export type Dashboard = {
+  today: string;
+  date: string;
+  child: User;
+  tasks: Task[];
+  wallet: { balance: number; earned: number; spent: number };
+  ledger: Entry[];
+  week: { date: string; earned: number; spent: number }[];
+  reviews: Submission[];
+  rules: Rule[];
+  rewards: Reward[];
+  redemptions: Redemption[];
+  dayEarned: number;
+};

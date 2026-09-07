@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.env*
+data
+backups
+android
+docs
+tests
+artifacts
+playwright-report
+test-results

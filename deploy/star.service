@@ -1,0 +1,23 @@
+[Unit]
+Description=Star Explorer application
+After=network.target
+
+[Service]
+Type=simple
+User=star
+Group=star
+WorkingDirectory=/opt/star/current
+EnvironmentFile=/opt/star/server.env
+ExecStart=/opt/star/runtime/node-v24.14.0-linux-x64/bin/node server/index.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/star/data /opt/star/backups
+UMask=0077
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+node_modules
+dist
+android
+package-lock.json
+docs/design
+docs/screenshots
+artifacts
+data
+backups
