@@ -103,7 +103,9 @@ public final class StarApi {
         status >= 400 ? connection.getErrorStream() : connection.getInputStream();
       String value = readText(stream, 25 * 1024 * 1024);
       Object result = new JSONTokener(value).nextValue();
-      if (idempotent) prefs.edit().remove(signature).apply();
+      // A 5xx response may follow a successful commit behind a gateway. Keep the
+      // same operation identifier so retrying cannot award or spend stars twice.
+      if (idempotent && status < 500) prefs.edit().remove(signature).apply();
       if (status < 200 || status >= 300) throw new ApiException(
         status,
         result instanceof JSONObject

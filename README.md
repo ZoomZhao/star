@@ -54,7 +54,7 @@ npm run android:build
 npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-产物为 `artifacts/star-explorer-native.apk`（0.2.3-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
+产物为 `artifacts/star-explorer-native.apk`（0.2.4-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
 
 发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 
@@ -138,8 +138,10 @@ npm run test:e2e     # 浏览器端完整流程，独立内存数据库，不影
 npm run build       # TypeScript + Web 生产构建
 ```
 
-浏览器测试使用本机 Chrome，启动独立 3002 / 5174 端口。此前 10 个 API 测试与 6 个浏览器流程通过。Android 0.2.3-native 构建通过，模拟器按平板 2800×1840 / 400 dpi 验证两套皮肤、区域滚动、固定控件、家长奖励管理入口和完成动画，RefinementTest 两项流程通过。最新实屏预览和 ImageGen 稿件见 `docs/design/native/IMPLEMENTATION.md`。DMG-W00 上保留 0.2.2-native 与登录数据，本次 0.2.3-native 安装等待解锁。
+浏览器测试使用本机 Chrome，启动独立 3002 / 5174 端口。本次 Review 后 13 项 API 测试、10 项浏览器流程通过。Android 0.2.4-native 构建、2 项布局单元测试、2 项网络恢复测试和 2 项 RefinementTest 流程通过；界面测试使用 2800×1840 / 400 dpi 专用模拟器和独立测试包。视觉预览见 `docs/design/native/IMPLEMENTATION.md`，本次修复细节见 `docs/REVIEW-2026-09-08.md`。本次未部署 ECS 或覆盖安装日常使用平板。
 
 设计图、生成提示词位于 `docs/design/`；界面截图位于 `docs/screenshots/`。原始 PNG 保留在设计目录，应用使用压缩 WebP。
 
 官方参考：[Android Views](https://developer.android.com/develop/ui/views/layout/declaring-layout)、[Node SQLite API](https://nodejs.org/docs/latest-v24.x/api/sqlite.html)。
+
+本次整体 Review 的修复、验证范围与后续建议见 [Review 记录](docs/REVIEW-2026-09-08.md)。

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS ledger(id TEXT PRIMARY KEY, child_id TEXT NOT NULL RE
 CREATE INDEX IF NOT EXISTS task_child_date ON tasks(child_id,date);
 CREATE INDEX IF NOT EXISTS ledger_child_date ON ledger(child_id,date);
 CREATE INDEX IF NOT EXISTS submission_status ON submissions(child_id,status);
+CREATE INDEX IF NOT EXISTS submission_task_status ON submissions(task_id,status);
 PRAGMA user_version=1;
 `;
 export function openDb(path) {

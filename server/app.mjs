@@ -309,13 +309,17 @@ export function createApp(config = {}) {
     const task = get(db, 'SELECT * FROM tasks WHERE id=?', id.parse(req.params.taskId));
     if (!task) fail(404, '任务不存在');
     child(req, task.child_id);
-    if (task.date > today() || (req.user.role === 'child' && task.date !== today()))
-      fail(400, '只能完成当天任务');
     const v = z.object({ note: description }).parse(req.body);
     const requestKey = key(req);
     const result = tx(db, () => {
       const existing = get(db, 'SELECT * FROM submissions WHERE request_key=?', requestKey);
-      if (existing) return existing;
+      if (existing) {
+        if (existing.task_id !== task.id || existing.note !== v.note)
+          fail(409, '操作编号已用于其他内容，请刷新后重试');
+        return existing;
+      }
+      if (task.date > today() || (req.user.role === 'child' && task.date !== today()))
+        fail(400, '只能完成当天任务');
       const used = get(
         db,
         "SELECT COUNT(*) n FROM submissions WHERE task_id=? AND status IN ('pending','approved')",
@@ -422,7 +426,21 @@ export function createApp(config = {}) {
     const effective = addDays(today(), 1);
     if (v.schedule === 'once' && v.on_date < effective)
       fail(400, '模板变更从明日起生效，单日变更请编辑当日任务');
-    tx(db, () =>
+    tx(db, () => {
+      // A preview must not freeze tomorrow's template. Preserve explicit day edits
+      // (fields differ from their source version), today's snapshots and submissions.
+      run(
+        db,
+        `DELETE FROM tasks WHERE rule_key=? AND date>=?
+        AND NOT EXISTS (SELECT 1 FROM submissions s WHERE s.task_id=tasks.id)
+        AND EXISTS (SELECT 1 FROM rules r WHERE r.rule_key=tasks.rule_key
+          AND r.version=tasks.rule_version AND r.title=tasks.title
+          AND r.description=tasks.description AND r.icon=tasks.icon
+          AND r.subject=tasks.subject AND r.stars=tasks.stars
+          AND r.daily_limit=tasks.daily_limit)`,
+        old.rule_key,
+        effective,
+      );
       insert(db, 'rules', {
         ...old,
         ...v,
@@ -432,8 +450,8 @@ export function createApp(config = {}) {
         effective_from: effective,
         version: old.version + 1,
         created_at: now(),
-      }),
-    );
+      });
+    });
     res.json({ ok: true, effective_from: effective });
   });
   app.patch('/api/tasks/:taskId', (req, res) => {
@@ -472,20 +490,30 @@ export function createApp(config = {}) {
       })
       .parse(req.body);
     const requestKey = key(req);
-    const result = tx(
-      db,
-      () =>
-        get(db, 'SELECT * FROM ledger WHERE request_key=?', requestKey) ||
-        postLedger({
-          childId: c.id,
-          amount: v.kind === 'bonus' ? v.amount : -v.amount,
-          kind: v.kind,
-          title: v.title,
-          note: v.note,
-          actor: req.user.id,
-          requestKey,
-        }),
-    );
+    const result = tx(db, () => {
+      const existing = get(db, 'SELECT * FROM ledger WHERE request_key=?', requestKey);
+      const amount = v.kind === 'bonus' ? v.amount : -v.amount;
+      if (existing) {
+        if (
+          existing.child_id !== c.id ||
+          existing.kind !== v.kind ||
+          existing.amount !== amount ||
+          existing.title !== v.title ||
+          existing.note !== v.note
+        )
+          fail(409, '操作编号已用于其他内容，请刷新后重试');
+        return existing;
+      }
+      return postLedger({
+        childId: c.id,
+        amount: v.kind === 'bonus' ? v.amount : -v.amount,
+        kind: v.kind,
+        title: v.title,
+        note: v.note,
+        actor: req.user.id,
+        requestKey,
+      });
+    });
     res.json(result);
   });
   app.post('/api/ledger/:ledgerId/reverse', (req, res) => {
@@ -546,17 +574,21 @@ export function createApp(config = {}) {
   app.post('/api/children/:childId/redemptions', (req, res) => {
     const c = child(req, req.params.childId);
     const { reward_id } = z.object({ reward_id: id }).parse(req.body);
-    const r = get(
-      db,
-      'SELECT * FROM rewards WHERE id=? AND family_id=? AND active=1',
-      reward_id,
-      c.family_id,
-    );
-    if (!r) fail(404, '奖励已下架');
     const requestKey = key(req);
     const result = tx(db, () => {
       const existing = get(db, 'SELECT * FROM redemptions WHERE request_key=?', requestKey);
-      if (existing) return existing;
+      if (existing) {
+        if (existing.child_id !== c.id || existing.reward_id !== reward_id)
+          fail(409, '操作编号已用于其他内容，请刷新后重试');
+        return existing;
+      }
+      const r = get(
+        db,
+        'SELECT * FROM rewards WHERE id=? AND family_id=? AND active=1',
+        reward_id,
+        c.family_id,
+      );
+      if (!r) fail(404, '奖励已下架');
       if (balance(db, c.id) < r.cost) fail(409, '星星还不够，再完成几个任务吧');
       if (
         get(

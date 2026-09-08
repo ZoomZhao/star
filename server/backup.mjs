@@ -133,6 +133,9 @@ const rows = {
     .strict(),
 };
 const tables = Object.keys(rows);
+function invalid(message) {
+  throw Object.assign(new Error(message), { status: 400 });
+}
 const backupSchema = z
   .object({
     format: z.literal('star-explorer'),
@@ -162,24 +165,114 @@ export function restore(db, input, backupDir) {
   try {
     tx(candidate, () => importRows(candidate, content.data));
     if (!get(candidate, "SELECT id FROM users WHERE role='admin' AND active=1"))
-      throw new Error('备份必须包含有效的超级管理员');
+      invalid('备份必须包含有效的超级管理员');
     if (all(candidate, 'SELECT child_id FROM ledger GROUP BY child_id HAVING SUM(amount)<0').length)
-      throw new Error('备份含负余额');
+      invalid('备份含负余额');
     if (
       get(
         candidate,
         'SELECT s.id FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE s.child_id!=t.child_id LIMIT 1',
       )
     )
-      throw new Error('备份任务关系不一致');
+      invalid('备份任务关系不一致');
     if (
       get(
         candidate,
         "SELECT t.id FROM tasks t JOIN users u ON u.id=t.child_id WHERE u.role!='child' LIMIT 1",
       )
     )
-      throw new Error('备份孩子身份不一致');
-    if (all(candidate, 'PRAGMA foreign_key_check').length) throw new Error('备份引用不完整');
+      invalid('备份孩子身份不一致');
+    for (const table of ['rules', 'redemptions', 'ledger']) {
+      if (
+        get(
+          candidate,
+          `SELECT x.id FROM ${table} x JOIN users u ON u.id=x.child_id
+          WHERE u.role!='child' LIMIT 1`,
+        )
+      )
+        invalid('备份孩子身份不一致');
+    }
+    if (
+      get(
+        candidate,
+        `SELECT r.id FROM redemptions r
+        JOIN rewards w ON w.id=r.reward_id JOIN users c ON c.id=r.child_id
+        WHERE w.family_id!=c.family_id LIMIT 1`,
+      )
+    )
+      invalid('备份奖励家庭不一致');
+    for (const [table, actor] of [
+      ['ledger', 'actor_id'],
+      ['submissions', 'reviewed_by'],
+      ['redemptions', 'reviewed_by'],
+    ]) {
+      if (
+        get(
+          candidate,
+          `SELECT x.id FROM ${table} x
+          JOIN users a ON a.id=x.${actor} JOIN users c ON c.id=x.child_id
+          WHERE a.role='child' OR (a.role='parent' AND a.family_id!=c.family_id) LIMIT 1`,
+        )
+      )
+        invalid('备份操作人权限不一致');
+    }
+    if (
+      get(
+        candidate,
+        `SELECT l.id FROM ledger l
+        LEFT JOIN submissions s ON s.id=l.submission_id
+        LEFT JOIN tasks t ON t.id=s.task_id
+        LEFT JOIN redemptions r ON r.id=l.redemption_id
+        LEFT JOIN ledger original ON original.id=l.reversal_of
+        WHERE (l.kind='task' AND (s.id IS NULL OR s.status!='approved'
+          OR s.child_id!=l.child_id OR l.amount!=t.stars))
+        OR (l.kind='reward' AND (r.id IS NULL OR r.status!='approved'
+          OR r.child_id!=l.child_id OR l.amount!=-r.cost))
+        OR (l.kind='reversal' AND (original.id IS NULL OR original.kind='reversal'
+          OR original.child_id!=l.child_id OR l.amount!=-original.amount))
+        OR (l.submission_id IS NOT NULL AND l.kind!='task')
+        OR (l.redemption_id IS NOT NULL AND l.kind!='reward')
+        OR (l.reversal_of IS NOT NULL AND l.kind!='reversal')
+        OR (l.kind='bonus' AND l.amount<0)
+        OR (l.kind IN ('spend','deduction') AND l.amount>0) LIMIT 1`,
+      )
+    )
+      invalid('备份流水与业务记录不一致');
+    for (const [table, link] of [
+      ['submissions', 'submission_id'],
+      ['redemptions', 'redemption_id'],
+    ]) {
+      if (
+        get(
+          candidate,
+          `SELECT x.id FROM ${table} x
+          LEFT JOIN ledger l ON l.${link}=x.id
+          WHERE (x.status='approved' AND l.id IS NULL)
+          OR (x.status='pending' AND (x.reviewed_by IS NOT NULL OR x.reviewed_at IS NOT NULL))
+          OR (x.status!='pending' AND (x.reviewed_by IS NULL OR x.reviewed_at IS NULL)) LIMIT 1`,
+        )
+      )
+        invalid('备份审核状态不一致');
+    }
+    if (
+      get(
+        candidate,
+        `SELECT t.id FROM tasks t JOIN submissions s ON s.task_id=t.id
+        WHERE s.status IN ('pending','approved') GROUP BY t.id
+        HAVING COUNT(*)>t.daily_limit LIMIT 1`,
+      )
+    )
+      invalid('备份任务次数超出上限');
+    if (
+      get(
+        candidate,
+        `SELECT id FROM rules WHERE
+        (schedule='once' AND on_date IS NULL) OR
+        (schedule='weekly' AND json_array_length(weekdays)=0) LIMIT 1`,
+      )
+    )
+      invalid('备份任务安排不完整');
+    if (all(candidate, 'PRAGMA foreign_key_check').length) invalid('备份引用不完整');
   } finally {
     candidate.close();
   }

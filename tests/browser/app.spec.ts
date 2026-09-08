@@ -220,3 +220,100 @@ test('parent can edit a pending reward, take it off sale and put it back', async
   await page.getByRole('button', { name: '审核兑换申请', exact: true }).click();
   await expect(page.getByRole('heading', { name: '看看孩子的努力' })).toBeVisible();
 });
+
+test('uncertain server responses reuse the operation across reloads without duplicate stars', async ({
+  page,
+}) => {
+  await login(page, 'parent');
+  await expect(page.locator('.task-card').first()).toBeVisible();
+  const operationKeys: string[] = [];
+  await page.route('**/api/children/*/ledger', async (route) => {
+    operationKeys.push(route.request().headers()['idempotency-key']);
+    const response = await route.fetch();
+    if (operationKeys.length === 1)
+      await route.fulfill({ status: 502, json: { error: '暂时无法获取操作结果' } });
+    else await route.fulfill({ response });
+  });
+  const invoke = () =>
+    page.evaluate(async () => {
+      const { api, requestId } = await import('/src/api.ts');
+      const children = await api('/api/children');
+      const path = `/api/children/${children[0].id}`;
+      const before = await api(path + '/dashboard');
+      let error = '';
+      try {
+        await api(
+          path + '/ledger',
+          'POST',
+          { title: '网络重试测试', kind: 'bonus', amount: 1 },
+          requestId(),
+        );
+      } catch (e) {
+        error = (e as Error).message;
+      }
+      const after = await api(path + '/dashboard');
+      return { error, before: before.wallet.balance, after: after.wallet.balance };
+    });
+  const first = await invoke();
+  expect(first.error).toBeTruthy();
+  expect(first.after).toBe(first.before + 1);
+  await page.reload();
+  await expect(page.locator('.task-card').first()).toBeVisible();
+  const retry = await invoke();
+  expect(retry.error).toBe('');
+  expect(retry.after).toBe(first.after);
+  expect(operationKeys).toHaveLength(2);
+  expect(operationKeys[0]).toBe(operationKeys[1]);
+});
+
+test('logout synchronizes other tabs and removes the previous account interface', async ({
+  page,
+  context,
+}) => {
+  await login(page);
+  const second = await context.newPage();
+  await second.goto('/');
+  await expect(second.locator('.task-card').first()).toBeVisible();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '退出 / 更换账号' }).click();
+  await expect(second.getByRole('button', { name: '出发，去星星岛', exact: true })).toBeVisible();
+  await expect(second.locator('.task-card')).toHaveCount(0);
+  await second.close();
+});
+
+test('an open today page advances after midnight without changing a chosen historical day', async ({
+  page,
+  request,
+}) => {
+  const config = await (await request.get('http://127.0.0.1:3002/api/config')).json();
+  await page.clock.install({ time: new Date(config.today + 'T23:59:50+08:00') });
+  await login(page);
+  await expect(page.locator('.task-card').first()).toBeVisible();
+  const tomorrow = new Date(config.today + 'T12:00:00Z');
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  const next = tomorrow.toISOString().slice(0, 10);
+  const updated = page.waitForResponse((r) => r.url().includes('/dashboard?date=' + next));
+  await page.clock.fastForward(25000);
+  await updated;
+  await expect(page.locator('input[type=date]').first()).toHaveValue(next);
+  await page.locator('input[type=date]').first().fill(config.today);
+  await page.clock.fastForward(86400000);
+  await expect(page.locator('input[type=date]').first()).toHaveValue(config.today);
+});
+
+test('family-load failure offers a working retry instead of reporting an unallocated child', async ({
+  page,
+}) => {
+  let attempts = 0;
+  await page.route('**/api/children', async (route) => {
+    if (++attempts === 1)
+      await route.fulfill({ status: 503, json: { error: '家庭信息暂时不可用' } });
+    else await route.continue();
+  });
+  await login(page);
+  await expect(page.getByRole('alert')).toContainText('家庭信息暂时不可用');
+  await expect(page.getByText('还没有分配小朋友，请联系管理员。', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '重新加载', exact: true }).click();
+  await expect(page.locator('.task-card').first()).toBeVisible();
+  expect(attempts).toBe(2);
+});

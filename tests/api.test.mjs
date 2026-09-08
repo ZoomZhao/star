@@ -492,3 +492,200 @@ test('parents manage active and inactive family rewards; children only see and r
   assert.equal(visible.title, '修改后的奖励');
   assert.equal(visible.cost, 8);
 });
+
+test('future previews follow template edits while daily overrides and history stay intact', async (t) => {
+  const s = await setup(t),
+    todayData = await s.dashboard();
+  const rule = todayData.rules[0],
+    tomorrow = addDays(today(), 1),
+    later = addDays(today(), 2);
+  const preview = (await s.dashboard(tomorrow)).tasks.find((x) => x.rule_key === rule.rule_key);
+  const override = (await s.dashboard(later)).tasks.find((x) => x.rule_key === rule.rule_key);
+  assert.equal(
+    (await s.call(`/api/tasks/${override.id}`, 'PATCH', { ...override, stars: 9 }, s.parent.token))
+      .status,
+    200,
+  );
+  const change = { ...rule, stars: 4, enabled: true };
+  assert.equal(
+    (await s.call(`/api/rules/${rule.rule_key}`, 'PATCH', change, s.parent.token)).status,
+    200,
+  );
+  const fresh = (await s.dashboard(tomorrow)).tasks.find((x) => x.rule_key === rule.rule_key);
+  assert.notEqual(fresh.id, preview.id);
+  assert.equal(fresh.stars, 4);
+  assert.equal(
+    (await s.dashboard()).tasks.find((x) => x.rule_key === rule.rule_key).stars,
+    rule.stars,
+  );
+  assert.equal((await s.dashboard(later)).tasks.find((x) => x.id === override.id).stars, 9);
+  assert.equal(
+    (
+      await s.call(
+        `/api/rules/${rule.rule_key}`,
+        'PATCH',
+        { ...change, enabled: false },
+        s.parent.token,
+      )
+    ).status,
+    200,
+  );
+  assert.ok(!(await s.dashboard(tomorrow)).tasks.some((x) => x.rule_key === rule.rule_key));
+  assert.equal(
+    (
+      await s.call(
+        `/api/rules/${rule.rule_key}`,
+        'PATCH',
+        { ...change, schedule: 'once', on_date: later },
+        s.parent.token,
+      )
+    ).status,
+    200,
+  );
+  assert.ok(!(await s.dashboard(tomorrow)).tasks.some((x) => x.rule_key === rule.rule_key));
+  assert.equal((await s.dashboard(later)).tasks.find((x) => x.id === override.id).stars, 9);
+});
+
+test('idempotency rejects changed payloads and replays successful redemptions after delisting', async (t) => {
+  const s = await setup(t),
+    d = await s.dashboard(),
+    path = `/api/children/${s.child.user.id}`;
+  const key = uid(),
+    body = { amount: 2, kind: 'bonus', title: '稳定重试' };
+  const first = await s.call(path + '/ledger', 'POST', body, s.parent.token, key);
+  assert.equal(
+    (await s.call(path + '/ledger', 'POST', body, s.parent.token, key)).data.id,
+    first.data.id,
+  );
+  assert.equal(
+    (await s.call(path + '/ledger', 'POST', { ...body, amount: 3 }, s.parent.token, key)).status,
+    409,
+  );
+  const taskKey = uid(),
+    firstTask = d.tasks[0];
+  const submit = await s.call(
+    `/api/tasks/${firstTask.id}/submit`,
+    'POST',
+    {},
+    s.child.token,
+    taskKey,
+  );
+  assert.equal(submit.status, 200);
+  assert.equal(
+    (await s.call(`/api/tasks/${d.tasks[1].id}/submit`, 'POST', {}, s.child.token, taskKey)).status,
+    409,
+  );
+  // Simulate retrying a confirmed request after the calendar has rolled over.
+  s.db.prepare('UPDATE tasks SET date=? WHERE id=?').run(addDays(today(), -1), firstTask.id);
+  assert.equal(
+    (await s.call(`/api/tasks/${firstTask.id}/submit`, 'POST', {}, s.child.token, taskKey)).data.id,
+    submit.data.id,
+  );
+  const reward = d.rewards[0],
+    rewardKey = uid(),
+    redemptionBody = { reward_id: reward.id };
+  const redemption = await s.call(
+    path + '/redemptions',
+    'POST',
+    redemptionBody,
+    s.child.token,
+    rewardKey,
+  );
+  await s.call(`/api/rewards/${reward.id}`, 'PATCH', { ...reward, active: false }, s.parent.token);
+  assert.equal(
+    (await s.call(path + '/redemptions', 'POST', redemptionBody, s.child.token, rewardKey)).data.id,
+    redemption.data.id,
+  );
+  assert.equal(
+    (
+      await s.call(
+        path + '/redemptions',
+        'POST',
+        { reward_id: d.rewards[1].id },
+        s.child.token,
+        rewardKey,
+      )
+    ).status,
+    409,
+  );
+  assert.equal((await s.dashboard()).wallet.balance, d.wallet.balance + 2);
+});
+
+test('restore rejects invalid ownership, approvals and ledger links without touching live data or sessions', async (t) => {
+  const s = await setup(t),
+    d = await s.dashboard(),
+    path = `/api/children/${s.child.user.id}`;
+  await s.call(`/api/tasks/${d.tasks[0].id}/submit`, 'POST', {}, s.parent.token, uid());
+  const redemption = await s.call(
+    path + '/redemptions',
+    'POST',
+    { reward_id: d.rewards[0].id },
+    s.child.token,
+    uid(),
+  );
+  await s.call(
+    `/api/redemptions/${redemption.data.id}/review`,
+    'POST',
+    { approve: true },
+    s.parent.token,
+  );
+  const spend = (await s.dashboard()).ledger.find((x) => x.redemption_id === redemption.data.id);
+  await s.call(`/api/ledger/${spend.id}/reverse`, 'POST', { note: '退回兑换' }, s.parent.token);
+  const baseline = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  const mutations = [
+    (b) => {
+      b.data.rules[0].child_id = s.parent.user.id;
+    },
+    (b) => {
+      b.data.ledger[0].actor_id = s.child.user.id;
+    },
+    (b) => {
+      b.data.ledger.find((x) => x.kind === 'task').amount += 1;
+    },
+    (b) => {
+      b.data.ledger = b.data.ledger.filter((x) => x.kind !== 'task');
+    },
+    (b) => {
+      b.data.submissions[0].status = 'pending';
+    },
+    (b) => {
+      b.data.rules[0].schedule = 'once';
+      b.data.rules[0].on_date = null;
+    },
+    (b) => {
+      b.data.rules[0].schedule = 'weekly';
+      b.data.rules[0].weekdays = '[]';
+    },
+    (b) => {
+      const family = { ...b.data.families[0], id: uid() };
+      b.data.families.push(family);
+      b.data.rewards[0].family_id = family.id;
+    },
+  ];
+  for (const mutate of mutations) {
+    const bad = structuredClone(baseline);
+    mutate(bad);
+    const result = await s.call(
+      '/api/admin/restore',
+      'POST',
+      { backup: bad, password: 'local-admin-2026' },
+      s.admin.token,
+    );
+    assert.equal(result.status, 400, JSON.stringify(result.data));
+    assert.equal((await s.call('/api/me', 'GET', null, s.parent.token)).status, 200);
+    const after = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+    assert.deepEqual(after.data, baseline.data);
+    assert.equal(readdirSync(s.dir).length, 0);
+  }
+  assert.equal(
+    (
+      await s.call(
+        '/api/admin/restore',
+        'POST',
+        { backup: baseline, password: 'local-admin-2026' },
+        s.admin.token,
+      )
+    ).status,
+    200,
+  );
+});

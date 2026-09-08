@@ -319,6 +319,8 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null),
     [loading, setLoading] = useState(true),
     [children, setChildren] = useState<User[]>([]),
+    [childrenLoaded, setChildrenLoaded] = useState(false),
+    [childrenRetry, setChildrenRetry] = useState(0),
     [childId, setChildId] = useState(''),
     [date, setDate] = useState(currentDate()),
     [data, setData] = useState<Dashboard | null>(null),
@@ -357,6 +359,7 @@ export default function App() {
   );
   const working = useRef(false),
     lastBalance = useRef<number | null>(null),
+    observedToday = useRef(currentDate()),
     fetchVersion = useRef(0);
   const isParent = user?.role === 'parent' || user?.role === 'admin';
   useEffect(() => {
@@ -366,8 +369,11 @@ export default function App() {
       .catch(() => {})
       .finally(() => setLoading(false));
     const reset = () => {
+      fetchVersion.current++;
       setUser(null);
       setData(null);
+      setChildren([]);
+      setChildId('');
       setDialog(null);
     };
     window.addEventListener('star-session-expired', reset);
@@ -383,19 +389,33 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!user) return;
+    let active = true;
+    setChildrenLoaded(false);
+    setError('');
     setPage(user.role === 'admin' ? 'admin' : 'today');
     setChildId('');
     setData(null);
     lastBalance.current = null;
     api<User[]>('/api/children')
       .then((cs) => {
+        if (!active) return;
         setChildren(cs);
+        setChildrenLoaded(true);
         setChildId(cs[0]?.id || '');
       })
-      .catch((e) => setError(e.message));
-  }, [user]);
+      .catch((e) => {
+        if (active) setError(e.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user, childrenRetry]);
   const refresh = useCallback(async () => {
-    if (!childId) return;
+    if (!user) return;
+    if (!childId) {
+      setChildrenRetry((n) => n + 1);
+      return;
+    }
     const n = ++fetchVersion.current;
     const d = await api<Dashboard>(`/api/children/${childId}/dashboard?date=${date}`);
     if (n !== fetchVersion.current) return;
@@ -409,27 +429,39 @@ export default function App() {
       setNotice(`收到 ${d.wallet.balance - lastBalance.current} 颗星星！你的努力被看见啦 ✨`);
     }
     lastBalance.current = d.wallet.balance;
-  }, [childId, date, user?.role]);
+  }, [childId, date, user]);
   useEffect(() => {
     setData(null);
     lastBalance.current = null;
-    refresh().catch((e) => setError(e.message));
+    if (childId) refresh().catch((e) => setError(e.message));
     return () => {
       fetchVersion.current++;
     };
-  }, [refresh]);
+  }, [refresh, childId]);
   useEffect(() => {
     if (!user || !childId) return;
     const tick = () => {
-      if (document.visibilityState === 'visible') refresh().catch(() => {});
+      if (document.visibilityState !== 'visible') return;
+      const now = currentDate();
+      const followToday = date === observedToday.current;
+      observedToday.current = now;
+      if (followToday && date !== now) {
+        setDate(now);
+        return;
+      }
+      refresh().catch(() => {});
     };
     const t = setInterval(tick, 20000);
     window.addEventListener('focus', tick);
+    window.addEventListener('online', tick);
+    document.addEventListener('visibilitychange', tick);
     return () => {
       clearInterval(t);
       window.removeEventListener('focus', tick);
+      window.removeEventListener('online', tick);
+      document.removeEventListener('visibilitychange', tick);
     };
-  }, [user, childId, refresh]);
+  }, [user, childId, refresh, date]);
   useEffect(() => {
     if (notice) {
       const t = setTimeout(() => setNotice(''), 5500);
@@ -439,8 +471,12 @@ export default function App() {
   async function logout() {
     await api('/api/logout', 'POST').catch(() => {});
     await saveToken('');
+    fetchVersion.current++;
     setUser(null);
     setData(null);
+    setChildren([]);
+    setChildId('');
+    setDate(currentDate());
     setDialog(null);
     setError('');
   }
@@ -642,7 +678,14 @@ export default function App() {
         {user.role === 'admin' ? (
           <AdminPanel busy={busy} act={act} logout={logout} />
         ) : !childId ? (
-          <Empty>还没有分配小朋友，请联系管理员。</Empty>
+          <Empty>
+            {childrenLoaded ? '还没有分配小朋友，请联系管理员。' : '正在加载家庭信息…'}
+            {(childrenLoaded || error) && (
+              <button className="secondary" onClick={() => setChildrenRetry((n) => n + 1)}>
+                重新加载
+              </button>
+            )}
+          </Empty>
         ) : !data ? (
           <div className="loading-panel">
             <StarIcon size={38} />

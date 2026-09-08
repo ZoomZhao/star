@@ -50,6 +50,7 @@ public class MainActivity extends AppCompatActivity {
   private int taskScrollY = 0,
     requestVersion = 0;
   private boolean busy = false,
+    initialized = false,
     wide = false,
     resumed = false,
     loading = false;
@@ -262,10 +263,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (err != null) {
           if (err instanceof StarApi.ApiException && ((StarApi.ApiException) err).status == 401) {
-            api.forget();
-            user = null;
-            data = null;
-            closeDialog();
+            logoutLocal();
           }
           error = err.getMessage() == null ? "操作未完成，请重试" : err.getMessage();
           loading = false;
@@ -304,6 +302,8 @@ public class MainActivity extends AppCompatActivity {
         Object[] a = (Object[]) r;
         children = (JSONArray) a[0];
         templates = (JSONArray) a[1];
+        initialized = true;
+        error = "";
         boolean found = false;
         for (int i = 0; i < children.length(); i++) if (
           obj(children, i).optString("id").equals(childId)
@@ -319,6 +319,10 @@ public class MainActivity extends AppCompatActivity {
 
   private void refresh(boolean show) {
     if (user == null) return;
+    if (!initialized) {
+      loadInitial();
+      return;
+    }
     if (admin() && page.equals("admin")) {
       async(
         () -> api.get("/api/admin/accounts"),
@@ -1257,7 +1261,12 @@ public class MainActivity extends AppCompatActivity {
     api.forget();
     requestVersion++;
     user = null;
+    initialized = false;
     data = null;
+    accounts = null;
+    children = new JSONArray();
+    templates = new JSONArray();
+    regionOffsets.clear();
     childId = "";
     date = today();
     page = "today";
