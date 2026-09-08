@@ -39,6 +39,9 @@ import {
   TentTree,
   Gamepad2,
   Info,
+  Search,
+  Building2,
+  UserRoundX,
 } from 'lucide-react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { api, initToken, saveToken, requestId, isNative, serverUrl, setServerUrl } from './api';
@@ -552,19 +555,21 @@ export default function App() {
         </div>
         <div className="top-actions">
           <Button className="secondary" onClick={() => setSkinOpen(true)}>
-            换装
+            {user.role === 'admin' ? '主题' : '换装'}
           </Button>
-          <Button
-            className="icon-btn sound-toggle"
-            aria-label={sound ? '关闭音效' : '打开音效'}
-            aria-pressed={sound}
-            onClick={() => {
-              setSound(!sound);
-              localStorage.setItem('star-sound', String(!sound));
-            }}
-          >
-            {sound ? <Volume2 /> : <VolumeX />}
-          </Button>
+          {user.role !== 'admin' && (
+            <Button
+              className="icon-btn sound-toggle"
+              aria-label={sound ? '关闭音效' : '打开音效'}
+              aria-pressed={sound}
+              onClick={() => {
+                setSound(!sound);
+                localStorage.setItem('star-sound', String(!sound));
+              }}
+            >
+              {sound ? <Volume2 /> : <VolumeX />}
+            </Button>
+          )}
           <Button
             className="icon-btn"
             aria-label="设置"
@@ -572,7 +577,7 @@ export default function App() {
           >
             <Settings />
           </Button>
-          {data && (
+          {data && user.role !== 'admin' && (
             <Button
               className="balance-pill"
               aria-label={`可用 ${data.wallet.balance} 颗星星，查看星星口袋`}
@@ -1295,7 +1300,10 @@ export default function App() {
       </main>
       <AnimatePresence>
         {skinOpen && (
-          <Modal title="我的换装间" close={() => setSkinOpen(false)}>
+          <Modal
+            title={user.role === 'admin' ? '界面主题' : '我的换装间'}
+            close={() => setSkinOpen(false)}
+          >
             <div className="skin-options">
               {[
                 ['dino', '恐龙探险', 'island-portrait'],
@@ -2065,7 +2073,11 @@ function SettingsPanel({
       )}
       <div className="info-strip">
         <ShieldCheck size={19} />
-        <span>家长入口需要家长账号登录。星星到账与消费都由家长确认。</span>
+        <span>
+          {user.role === 'admin'
+            ? '在管理中心分配家庭与账号，在这里修改自己的登录密码。'
+            : '家长入口需要家长账号登录。星星到账与消费都由家长确认。'}
+        </span>
       </div>
       <Button className="secondary full" onClick={logout}>
         <LogOut size={18} /> 退出 / 更换账号
@@ -2087,197 +2099,457 @@ function AdminPanel({
       families: { id: string; name: string }[];
       users: User[];
     }>({ families: [], users: [] }),
+    [loadingAccounts, setLoadingAccounts] = useState(true),
+    [query, setQuery] = useState(''),
+    [roleFilter, setRoleFilter] = useState('all'),
+    [familyFilter, setFamilyFilter] = useState('all'),
+    [statusFilter, setStatusFilter] = useState('all'),
+    [selectedFamily, setSelectedFamily] = useState(''),
+    [pendingAction, setPendingAction] = useState(''),
     [backup, setBackup] = useState<unknown>(null),
     [fileName, setFileName] = useState(''),
-    [error, setError] = useState('');
-  const load = () => api<typeof accounts>('/api/admin/accounts').then(setAccounts);
-  useEffect(() => {
-    load().catch((e) => setError(e.message));
+    [error, setError] = useState(''),
+    [fileError, setFileError] = useState('');
+  const accountForm = useRef<HTMLFormElement>(null);
+  const fileRead = useRef(0);
+  const load = useCallback(async () => {
+    setLoadingAccounts(true);
+    try {
+      setAccounts(await api<typeof accounts>('/api/admin/accounts'));
+      setError('');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingAccounts(false);
+    }
   }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+  async function perform(key: string, fn: () => Promise<unknown>, message: string) {
+    if (busy || pendingAction) return false;
+    setPendingAction(key);
+    try {
+      return await act(fn, message);
+    } finally {
+      setPendingAction('');
+    }
+  }
+  const familyNames = new Map(accounts.families.map((family) => [family.id, family.name]));
+  const roleNames = { child: '小朋友', parent: '家长', admin: '管理员' };
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredAccounts = accounts.users.filter(
+    (user) =>
+      (roleFilter === 'all' || user.role === roleFilter) &&
+      (familyFilter === 'all' || user.family_id === familyFilter) &&
+      (statusFilter === 'all' || Boolean(user.active) === (statusFilter === 'active')) &&
+      [user.name, user.username, familyNames.get(user.family_id || '') || '全局管理'].some(
+        (value) => value.toLocaleLowerCase().includes(normalizedQuery),
+      ),
+  );
+  const hasFilters =
+    !!query || roleFilter !== 'all' || familyFilter !== 'all' || statusFilter !== 'all';
+  function clearFilters() {
+    setQuery('');
+    setRoleFilter('all');
+    setFamilyFilter('all');
+    setStatusFilter('all');
+  }
+  const summary = [
+    { label: '家庭', value: accounts.families.length, icon: Building2 },
+    { label: '家长', value: accounts.users.filter((u) => u.role === 'parent').length, icon: Users },
+    {
+      label: '小朋友',
+      value: accounts.users.filter((u) => u.role === 'child').length,
+      icon: Sparkles,
+    },
+    { label: '已停用', value: accounts.users.filter((u) => !u.active).length, icon: UserRoundX },
+  ];
   return (
-    <section>
-      <PageHeading
-        eyebrow="A LITTLE CARE BEHIND EVERY STAR"
-        title="家庭与数据管理"
-        icon={<ShieldCheck />}
-      />
-      {error && <div className="error">{error}</div>}
-      <div className="admin-grid">
-        <section className="card">
-          <h3>
-            <Users size={20} /> 创建家庭
-          </h3>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const form = e.currentTarget;
-              const name = new FormData(form).get('name');
-              const ok = await act(
-                () => api('/api/admin/families', 'POST', { name }),
-                '家庭已创建',
-              );
-              if (ok) {
-                form.reset();
-                load();
-              }
-            }}
-          >
-            <Field label="家庭名称">
-              <input name="name" placeholder="例如：小星一家" required maxLength={100} />
-            </Field>
-            <Button className="primary" disabled={busy}>
-              <Plus size={17} /> 创建家庭
+    <section className="admin-page">
+      <div className="admin-heading">
+        <div>
+          <span className="eyebrow">FAMILY MANAGEMENT</span>
+          <h2>家庭与数据管理</h2>
+          <p className="muted">照顾好每一个家庭，让孩子的成长记录有序留存。</p>
+        </div>
+        <Button
+          className="primary"
+          onClick={() => {
+            const target = accountForm.current?.querySelector<HTMLInputElement>('input[name=name]');
+            target?.scrollIntoView({ block: 'center' });
+            target?.focus({ preventScroll: true });
+          }}
+        >
+          <Plus size={18} /> 添加账号
+        </Button>
+      </div>
+      <div className="admin-overview" aria-label="家庭与账号概览" aria-busy={loadingAccounts}>
+        {summary.map(({ label, value, icon: Icon }) => (
+          <div className="admin-stat" key={label}>
+            <div className="admin-stat-icon">
+              <Icon size={22} />
+            </div>
+            <div>
+              <strong>{loadingAccounts ? '—' : value}</strong>
+              <span>{label}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      {error && (
+        <div className="error global-error" role="alert">
+          {error}
+          <Button className="text-btn" onClick={load}>
+            重新加载账号
+          </Button>
+        </div>
+      )}
+      <div className="admin-layout">
+        <section
+          className="card account-list admin-accounts"
+          aria-labelledby="admin-accounts-title"
+        >
+          <div className="admin-section-heading">
+            <div>
+              <h3 id="admin-accounts-title">
+                已分配账号 <span className="admin-count">{accounts.users.length}</span>
+              </h3>
+              <p>按家庭和身份查找，随时管理账号状态。</p>
+            </div>
+            <Button
+              className="icon-btn"
+              aria-label="刷新账号列表"
+              disabled={loadingAccounts || busy}
+              loading={loadingAccounts}
+              onClick={load}
+            >
+              <RefreshCw size={17} />
             </Button>
-          </form>
-          <div className="family-tags">
-            {accounts.families.map((f) => (
-              <span className="tag approved" key={f.id}>
-                {f.name}
-              </span>
+          </div>
+          <div className="admin-toolbar">
+            <div className="admin-search">
+              <Search size={18} />
+              <input
+                type="search"
+                aria-label="搜索账号"
+                placeholder="搜索称呼、账号或家庭"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <select
+              aria-label="筛选家庭"
+              value={familyFilter}
+              onChange={(e) => setFamilyFilter(e.target.value)}
+            >
+              <option value="all">全部家庭</option>
+              {accounts.families.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="筛选身份"
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+            >
+              <option value="all">全部身份</option>
+              <option value="parent">家长</option>
+              <option value="child">小朋友</option>
+              <option value="admin">管理员</option>
+            </select>
+            <select
+              aria-label="账号状态"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="all">全部状态</option>
+              <option value="active">使用中</option>
+              <option value="inactive">已停用</option>
+            </select>
+          </div>
+          <div className="admin-result-line">
+            <span role="status">
+              {loadingAccounts ? '正在加载账号…' : `显示 ${filteredAccounts.length} 个账号`}
+            </span>
+            {hasFilters && (
+              <Button className="text-btn" onClick={clearFilters}>
+                清除筛选
+              </Button>
+            )}
+          </div>
+          <div className="admin-account-head" aria-hidden="true">
+            <span>称呼 / 登录账号</span>
+            <span>所属家庭</span>
+            <span>身份</span>
+            <span>状态</span>
+            <span>操作</span>
+          </div>
+          <div className="admin-account-rows" aria-busy={loadingAccounts}>
+            {filteredAccounts.map((u) => (
+              <div className="list-row admin-account-row" key={u.id}>
+                <div className="admin-account-identity">
+                  <div className="avatar" aria-hidden="true">
+                    {u.role === 'child' ? '🦖' : u.role === 'parent' ? '🌿' : '🛡️'}
+                  </div>
+                  <div>
+                    <strong>{u.name}</strong>
+                    <small>{u.username}</small>
+                  </div>
+                </div>
+                <div className="admin-account-family" data-label="家庭">
+                  {familyNames.get(u.family_id || '') || '全局管理'}
+                </div>
+                <div data-label="身份">
+                  <span className="admin-role">{roleNames[u.role]}</span>
+                </div>
+                <div data-label="状态">
+                  <span className="admin-state" data-active={!!u.active}>
+                    {u.active ? '使用中' : '已停用'}
+                  </span>
+                </div>
+                <div className="account-controls">
+                  {u.role !== 'admin' ? (
+                    <>
+                      <Button
+                        className="text-btn"
+                        disabled={busy}
+                        loading={pendingAction === u.id}
+                        onClick={async () => {
+                          if (
+                            await perform(
+                              u.id,
+                              () => api(`/api/admin/users/${u.id}`, 'PATCH', { active: !u.active }),
+                              '账号状态已更新',
+                            )
+                          )
+                            await load();
+                        }}
+                      >
+                        {u.active ? '停用' : '启用'}
+                      </Button>
+                      <ResetPassword user={u} busy={busy} act={act} />
+                    </>
+                  ) : (
+                    <span className="muted">在设置中管理</span>
+                  )}
+                </div>
+              </div>
             ))}
+            {!filteredAccounts.length && !loadingAccounts && (
+              <div className="admin-account-empty">
+                <Search size={28} />
+                <strong>{hasFilters ? '没有找到匹配的账号' : '还没有分配账号'}</strong>
+                <p>
+                  {hasFilters
+                    ? '试试其他关键词，或清除上方筛选。'
+                    : '先创建家庭，再为家长和孩子分配账号。'}
+                </p>
+              </div>
+            )}
           </div>
         </section>
-        <section className="card">
-          <h3>
-            <Plus size={20} /> 预分配账号
-          </h3>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const form = e.currentTarget,
-                f = new FormData(form);
-              const ok = await act(
-                () => api('/api/admin/users', 'POST', Object.fromEntries(f)),
-                '账号已分配',
-              );
-              if (ok) {
-                form.reset();
-                load();
-              }
-            }}
-          >
-            <div className="form-row">
-              <Field label="家庭">
-                <select name="family_id" required defaultValue="">
-                  <option value="" disabled>
-                    请选择家庭
-                  </option>
-                  {accounts.families.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="身份">
-                <select name="role">
-                  <option value="child">小朋友</option>
-                  <option value="parent">家长</option>
-                </select>
-              </Field>
+        <div className="admin-setup">
+          <section className="card admin-create-family">
+            <div className="admin-section-heading">
+              <div>
+                <h3>
+                  <span className="admin-step">01</span> 创建家庭
+                </h3>
+                <p>为家长和孩子准备一个共同的空间。</p>
+              </div>
             </div>
-            <div className="form-row">
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const form = e.currentTarget;
+                const name = new FormData(form).get('name');
+                let family: { id: string; name: string } | undefined;
+                if (
+                  await perform(
+                    'family',
+                    async () => {
+                      family = await api('/api/admin/families', 'POST', { name });
+                    },
+                    '家庭已创建',
+                  )
+                ) {
+                  form.reset();
+                  const created = family;
+                  if (created) {
+                    setAccounts((current) => ({
+                      ...current,
+                      families: current.families.some((f) => f.id === created.id)
+                        ? current.families
+                        : [...current.families, created],
+                    }));
+                    setSelectedFamily(created.id);
+                  }
+                  await load();
+                }
+              }}
+            >
+              <Field label="家庭名称">
+                <input name="name" placeholder="例如：小星一家" required maxLength={100} />
+              </Field>
+              <Button
+                className="secondary full"
+                disabled={busy}
+                loading={pendingAction === 'family'}
+              >
+                <Plus size={17} /> 创建家庭
+              </Button>
+            </form>
+            <div className="family-tags" aria-label="已创建的家庭">
+              {accounts.families.map((f) => (
+                <span className="tag approved" key={f.id}>
+                  {f.name}
+                </span>
+              ))}
+            </div>
+          </section>
+          <section className="card admin-create-account">
+            <div className="admin-section-heading">
+              <div>
+                <h3>
+                  <span className="admin-step">02</span> 预分配账号
+                </h3>
+                <p>分配后即可登录，无需自行注册。</p>
+              </div>
+            </div>
+            <form
+              ref={accountForm}
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const form = e.currentTarget,
+                  f = new FormData(form);
+                if (
+                  await perform(
+                    'account',
+                    () => api('/api/admin/users', 'POST', Object.fromEntries(f)),
+                    '账号已分配',
+                  )
+                ) {
+                  form.reset();
+                  clearFilters();
+                  await load();
+                }
+              }}
+            >
+              <div className="form-row">
+                <Field label="家庭">
+                  <select
+                    name="family_id"
+                    required
+                    value={selectedFamily}
+                    onChange={(e) => setSelectedFamily(e.target.value)}
+                  >
+                    <option value="" disabled>
+                      请选择家庭
+                    </option>
+                    {accounts.families.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="身份">
+                  <select name="role">
+                    <option value="child">小朋友</option>
+                    <option value="parent">家长</option>
+                  </select>
+                </Field>
+              </div>
               <Field label="称呼">
-                <input name="name" required maxLength={100} />
+                <input name="name" placeholder="例如：小星" required maxLength={100} />
               </Field>
               <Field label="登录账号">
                 <input
                   name="username"
+                  placeholder="3–40 位字母、数字、_ 或 -"
                   pattern="[a-zA-Z0-9_-]{3,40}"
                   title="3–40 位字母、数字、下划线或短横线"
                   required
+                  autoComplete="off"
                 />
               </Field>
-            </div>
-            <Field label="初始密码（至少 8 位）">
-              <input
-                name="password"
-                type="password"
-                minLength={8}
-                maxLength={200}
-                required
-                autoComplete="new-password"
-              />
-            </Field>
-            <Button className="primary" disabled={busy}>
-              分配账号
-            </Button>
-          </form>
-        </section>
-        <section className="card account-list">
-          <h3>已分配账号</h3>
-          {accounts.users.map((u) => (
-            <div className="list-row" key={u.id}>
-              <div className="avatar">
-                {u.role === 'child' ? '🦖' : u.role === 'parent' ? '🌿' : '🛡️'}
-              </div>
-              <div>
-                <strong>
-                  {u.name} <small>({u.username})</small>
-                </strong>
-                <p>
-                  {accounts.families.find((f) => f.id === u.family_id)?.name || '全局管理'} ·{' '}
-                  {u.role === 'child' ? '小朋友' : u.role === 'parent' ? '家长' : '管理员'}
-                  {!u.active ? ' · 已停用' : ''}
-                </p>
-              </div>
-              {u.role !== 'admin' && (
-                <div className="account-controls">
-                  <Button
-                    className="text-btn"
-                    disabled={busy}
-                    onClick={async () => {
-                      const ok = await act(
-                        () => api(`/api/admin/users/${u.id}`, 'PATCH', { active: !u.active }),
-                        '账号状态已更新',
-                      );
-                      if (ok) load();
-                    }}
-                  >
-                    {u.active ? '停用' : '启用'}
-                  </Button>
-                  <ResetPassword user={u} busy={busy} act={act} />
-                </div>
+              <Field label="初始密码（至少 8 位）">
+                <input
+                  name="password"
+                  type="password"
+                  minLength={8}
+                  maxLength={200}
+                  required
+                  autoComplete="new-password"
+                />
+              </Field>
+              {!accounts.families.length && !loadingAccounts && (
+                <p className="muted">先创建一个家庭，就可以分配账号。</p>
               )}
-            </div>
-          ))}
-        </section>
-        <section className="card backup-card">
-          <h3>
-            <ShieldCheck size={20} /> 备份与恢复
-          </h3>
-          <p className="muted">
-            完整备份包含家庭、账号、任务规则、审批记录与星星流水。请妥善保管下载文件。
-          </p>
+              <Button
+                className="primary full"
+                disabled={busy || !accounts.families.length}
+                loading={pendingAction === 'account'}
+              >
+                分配账号 <ChevronRight size={17} />
+              </Button>
+            </form>
+          </section>
+        </div>
+      </div>
+      <section className="card backup-card admin-backup">
+        <div className="admin-backup-summary">
+          <div className="admin-stat-icon">
+            <ShieldCheck size={25} />
+          </div>
+          <div>
+            <h3>备份与恢复</h3>
+            <p className="muted">保存家庭、账号、任务与星星流水，留住每一次成长。</p>
+          </div>
           <Button
-            className="primary full"
+            className="secondary"
             disabled={busy}
+            loading={pendingAction === 'backup'}
             onClick={() =>
-              act(async () => {
-                const b = await api('/api/admin/backup');
-                const url = URL.createObjectURL(
-                  new Blob([JSON.stringify(b, null, 2)], { type: 'application/json' }),
-                );
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `star-backup-${currentDate()}.json`;
-                a.click();
-                setTimeout(() => URL.revokeObjectURL(url), 1000);
-              }, '备份已生成')
+              perform(
+                'backup',
+                async () => {
+                  const b = await api('/api/admin/backup');
+                  const url = URL.createObjectURL(
+                    new Blob([JSON.stringify(b, null, 2)], { type: 'application/json' }),
+                  );
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `star-backup-${currentDate()}.json`;
+                  a.click();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                },
+                '备份已生成',
+              )
             }
           >
             <Download size={18} /> 下载完整备份
           </Button>
-          <hr />
+        </div>
+        <details className="admin-restore">
+          <summary>
+            恢复已有备份 <ChevronRight size={17} />
+          </summary>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
               const password = new FormData(e.currentTarget).get('password');
-              const ok = await act(
-                () => api('/api/admin/restore', 'POST', { backup, password }),
-                '数据已恢复，请重新登录',
-              );
-              if (ok) logout();
+              if (
+                await perform(
+                  'restore',
+                  () => api('/api/admin/restore', 'POST', { backup, password }),
+                  '数据已恢复，请重新登录',
+                )
+              )
+                logout();
             }}
           >
             <Field label="选择备份文件（JSON，最多 20MB）">
@@ -2286,25 +2558,37 @@ function AdminPanel({
                 accept=".json,application/json"
                 required
                 onChange={async (e) => {
+                  const version = ++fileRead.current;
                   setBackup(null);
                   setFileName('');
+                  setFileError('');
                   const f = e.target.files?.[0];
                   if (!f) return;
                   if (f.size > 20 * 1024 * 1024) {
-                    setError('文件超过 20MB');
+                    setFileError('文件超过 20MB');
                     return;
                   }
                   try {
-                    setBackup(JSON.parse(await f.text()));
+                    const value = JSON.parse(await f.text());
+                    if (fileRead.current !== version) return;
+                    setBackup(value);
                     setFileName(f.name);
-                    setError('');
                   } catch {
-                    setError('备份不是有效的 JSON 文件');
+                    if (fileRead.current === version) setFileError('备份不是有效的 JSON 文件');
                   }
                 }}
               />
             </Field>
-            {fileName && <p className="muted">已选择：{fileName}</p>}
+            {fileError && (
+              <div className="error" role="alert">
+                {fileError}
+              </div>
+            )}
+            {fileName && (
+              <p className="admin-file-status" role="status">
+                <Check size={16} /> 已选择：{fileName}
+              </p>
+            )}
             <div className="info-strip">
               恢复将替换当前全部数据。系统先自动保存恢复前备份，成功后所有账号需要重新登录。
             </div>
@@ -2314,12 +2598,16 @@ function AdminPanel({
             <label className="check-field">
               <input type="checkbox" required /> 我确认用此备份替换当前数据
             </label>
-            <Button className="secondary full" disabled={busy || !backup}>
+            <Button
+              className="secondary full"
+              disabled={busy || !backup}
+              loading={pendingAction === 'restore'}
+            >
               <Upload size={18} /> 确认恢复备份
             </Button>
           </form>
-        </section>
-      </div>
+        </details>
+      </section>
     </section>
   );
 }
