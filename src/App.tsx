@@ -400,7 +400,13 @@ export default function App() {
   useEffect(() => {
     if (!user || !childId) return;
     const tick = () => {
-      if (document.visibilityState !== 'visible') return;
+      if (
+        document.visibilityState !== 'visible' ||
+        working.current ||
+        dialog ||
+        document.activeElement?.matches('input, textarea, select, [contenteditable=true]')
+      )
+        return;
       const now = currentDate();
       const followToday = date === observedToday.current;
       observedToday.current = now;
@@ -410,7 +416,7 @@ export default function App() {
       }
       refresh().catch(() => {});
     };
-    const t = setInterval(tick, 20000);
+    const t = setInterval(tick, 60000);
     window.addEventListener('focus', tick);
     window.addEventListener('online', tick);
     document.addEventListener('visibilitychange', tick);
@@ -420,7 +426,7 @@ export default function App() {
       window.removeEventListener('online', tick);
       document.removeEventListener('visibilitychange', tick);
     };
-  }, [user, childId, refresh, date]);
+  }, [user, childId, refresh, date, dialog]);
   async function logout() {
     await api('/api/logout', 'POST').catch(() => {});
     await saveToken('');

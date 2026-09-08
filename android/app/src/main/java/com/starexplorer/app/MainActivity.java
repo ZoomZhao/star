@@ -61,7 +61,7 @@ public class MainActivity extends AppCompatActivity {
   private final Runnable poll = new Runnable() {
     public void run() {
       if (resumed && user != null && !busy && activeDialog == null) refresh(false);
-      handler.postDelayed(this, 20000);
+      handler.postDelayed(this, 60000);
     }
   };
 
@@ -207,8 +207,8 @@ public class MainActivity extends AppCompatActivity {
     super.onResume();
     resumed = true;
     handler.removeCallbacks(poll);
-    handler.postDelayed(poll, 20000);
-    if (user != null && !busy) refresh(false);
+    handler.postDelayed(poll, 60000);
+    if (user != null && !busy && activeDialog == null) refresh(false);
   }
 
   @Override

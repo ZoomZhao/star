@@ -302,7 +302,7 @@ test('an open today page advances after midnight without changing a chosen histo
   tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
   const next = tomorrow.toISOString().slice(0, 10);
   const updated = page.waitForResponse((r) => r.url().includes('/dashboard?date=' + next));
-  await page.clock.fastForward(25000);
+  await page.clock.fastForward(65000);
   await updated;
   await expect(page.locator('input[type=date]').first()).toHaveValue(next);
   await page.locator('input[type=date]').first().fill(config.today);
@@ -339,4 +339,38 @@ test('parent task order persists after reload within its subject', async ({ page
   await page.getByRole('button', { name: '任务规则', exact: true }).click();
   await page.getByRole('button', { name: '体育', exact: true }).click();
   await expect(cards.first().locator('h3')).toHaveText(moving);
+});
+
+test('foreground polling refreshes after one minute, pauses hidden, and refreshes on return', async ({
+  page,
+  request,
+}) => {
+  const config = await (await request.get('http://127.0.0.1:3002/api/config')).json();
+  await page.clock.install({ time: new Date(config.today + 'T12:00:00+08:00') });
+  let reads = 0;
+  page.on('request', (r) => {
+    if (r.url().includes('/dashboard?')) reads++;
+  });
+  await login(page);
+  await expect(page.locator('.task-card').first()).toBeVisible();
+  const initial = reads;
+  await page.clock.fastForward(59000);
+  expect(reads).toBe(initial);
+  const next = page.waitForResponse((r) => r.url().includes('/dashboard?'));
+  await page.clock.fastForward(2000);
+  await next;
+  expect(reads).toBe(initial + 1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.clock.fastForward(120000);
+  expect(reads).toBe(initial + 1);
+  const resumed = page.waitForResponse((r) => r.url().includes('/dashboard?'));
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await resumed;
+  expect(reads).toBe(initial + 2);
 });
