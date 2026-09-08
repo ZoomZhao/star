@@ -475,9 +475,14 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function submitTask(task: Task, note: string, bonus = false) {
+  async function submitTask(task: Task, note: string, adjustment = 0) {
     const ok = await act(() =>
-      api(`/api/tasks/${task.id}/submit`, 'POST', { note, bonus }, requestId()),
+      api(
+        `/api/tasks/${task.id}/submit`,
+        'POST',
+        { note, bonus: adjustment === 1, deduction: adjustment === -1 },
+        requestId(),
+      ),
     );
     if (ok) {
       feedback();
@@ -485,17 +490,18 @@ export default function App() {
         type: 'celebrate',
         title: isParent ? '星星到账啦！' : '太棒啦，任务已提交！',
         text: isParent
-          ? `已经获得 ${task.stars + (bonus ? 1 : 0)} 颗星星，每一次努力都算数。`
+          ? `已经获得 ${task.stars + adjustment} 颗星星，每一次努力都算数。`
           : '等家长确认后，星星就会飞进口袋。你可以继续探索其他任务！',
       });
     }
   }
-  async function review(id: string, approve: boolean, kind = 'submissions', bonus = false) {
+  async function review(id: string, approve: boolean, kind = 'submissions', adjustment = 0) {
     await act(
       () =>
         api(`/api/${kind}/${id}/review`, 'POST', {
           approve,
-          bonus,
+          bonus: adjustment === 1,
+          deduction: adjustment === -1,
           note: approve ? '做得真棒！' : '再试一次吧，完成后可以重新提交。',
         }),
       approve ? '已确认，星星账本已更新' : '已退回，孩子可以查看反馈',
@@ -1167,6 +1173,15 @@ export default function App() {
                             </div>
                           </div>
                           <div className="review-actions">
+                            {s.stars > 1 && (
+                              <Button
+                                className="secondary"
+                                disabled={busy}
+                                onClick={() => review(s.id, true, 'submissions', -1)}
+                              >
+                                通过，少发 1 星（+{s.stars - 1}）
+                              </Button>
+                            )}
                             <small>{timeText(s.created_at)} 提交</small>
                             <Button
                               className="secondary"
@@ -1186,7 +1201,7 @@ export default function App() {
                               <Button
                                 className="primary"
                                 disabled={busy}
-                                onClick={() => review(s.id, true, 'submissions', true)}
+                                onClick={() => review(s.id, true, 'submissions', 1)}
                               >
                                 通过并奖励 +{s.stars + 1}
                               </Button>
@@ -1377,7 +1392,7 @@ export default function App() {
                 parent={!!isParent}
                 busy={busy}
                 today={data?.today || currentDate()}
-                submit={(note, bonus) => submitTask(dialog.task, note, bonus)}
+                submit={(note, adjustment) => submitTask(dialog.task, note, adjustment)}
                 edit={() => setDialog({ type: 'rule', task: dialog.task })}
               />
             )}
@@ -1678,11 +1693,11 @@ function TaskDetail({
   parent: boolean;
   busy: boolean;
   today: string;
-  submit: (n: string, bonus: boolean) => void;
+  submit: (n: string, adjustment: number) => void;
   edit: () => void;
 }) {
   const [note, setNote] = useState('');
-  const [bonus, setBonus] = useState(false);
+  const [adjustment, setAdjustment] = useState(0);
   return (
     <div>
       <div className="detail-hero">
@@ -1718,7 +1733,7 @@ function TaskDetail({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              submit(note, bonus);
+              submit(note, adjustment);
             }}
           >
             <Field label="想告诉家长的话（可选）">
@@ -1729,21 +1744,18 @@ function TaskDetail({
                 placeholder="例如：今天我读了两页绘本！"
               />
             </Field>
-            <>
-              {parent && (
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={bonus}
-                    onChange={(e) => setBonus(e.target.checked)}
-                  />
-                  额外奖励 1 颗星
-                </label>
-              )}
-            </>
+            {parent && (
+              <Field label="本次发放星星">
+                <select value={adjustment} onChange={(e) => setAdjustment(Number(e.target.value))}>
+                  <option value={0}>按规则发放 {t.stars} 星</option>
+                  {t.stars > 1 && <option value={-1}>少发 1 星，发放 {t.stars - 1} 星</option>}
+                  <option value={1}>额外奖励 1 星，发放 {t.stars + 1} 星</option>
+                </select>
+              </Field>
+            )}
             <Button className="primary full" loading={busy}>
               {parent
-                ? `代完成 1 次，发放 ${t.stars + (bonus ? 1 : 0)} 星`
+                ? `代完成 1 次，发放 ${t.stars + adjustment} 星`
                 : '我完成了 1 次，请家长确认'}
             </Button>
           </form>

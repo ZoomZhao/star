@@ -80,6 +80,15 @@ export function openDb(path) {
     db.exec(
       'ALTER TABLE submissions ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0 CHECK(bonus IN (0,1))',
     );
+  if (
+    !db
+      .prepare('PRAGMA table_info(submissions)')
+      .all()
+      .some((c) => c.name === 'deduction')
+  )
+    db.exec(
+      'ALTER TABLE submissions ADD COLUMN deduction INTEGER NOT NULL DEFAULT 0 CHECK(deduction IN (0,1))',
+    );
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
   return db;
 }

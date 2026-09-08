@@ -1132,10 +1132,8 @@ public class MainActivity extends AppCompatActivity {
         t.optInt("pending") +
         " 次。"
     );
-    CheckBox bonus = new CheckBox(this);
-    bonus.setText("额外奖励 1 颗星");
-    if (parent()) f.addView(bonus);
-    ui.line(f, "家长可额外奖励 1 颗星");
+    Spinner award = parent() ? awardSelector(f, t.optInt("stars")) : null;
+    ui.line(f, "家长可额外奖励 1 星，基础超过 1 星时也可少发 1 星");
     EditText note = ui.input(
       f,
       "想告诉家长的话（选填）",
@@ -1168,7 +1166,7 @@ public class MainActivity extends AppCompatActivity {
         mutation(
           "/api/tasks/" + t.optString("id") + "/submit",
           "POST",
-          json("note", note.getText().toString(), "bonus", parent() && bonus.isChecked()),
+          json("note", note.getText().toString(), "bonus", award != null && award.getSelectedItemPosition() == 1, "deduction", award != null && award.getSelectedItemPosition() == 2),
           true,
           parent() ? "已发放星星 ★" : "已提交！等家长确认后就能收到星星啦"
         )
@@ -1708,6 +1706,13 @@ public class MainActivity extends AppCompatActivity {
     });
   }
 
+  private Spinner awardSelector(LinearLayout f, int stars) {
+    String[] choices = stars > 1
+      ? new String[] { "按规则发放 " + stars + " 星", "额外奖励 1 星，共 " + (stars + 1) + " 星", "少发 1 星，共 " + (stars - 1) + " 星" }
+      : new String[] { "按规则发放 1 星", "额外奖励 1 星，共 2 星" };
+    return ui.select(f, "本次发放星星", choices, 0);
+  }
+
   private void reviews(LinearLayout main) {
     title(main, "看见孩子的每一次努力", null);
     LinearLayout list = ui.col();
@@ -1740,9 +1745,7 @@ public class MainActivity extends AppCompatActivity {
                 "",
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
               );
-              CheckBox bonus = new CheckBox(this);
-              bonus.setText("额外奖励 1 颗星（共 " + (r.optInt("stars") + 1) + " 星）");
-              if (task && approve) f.addView(bonus);
+              Spinner award = task && approve ? awardSelector(f, r.optInt("stars")) : null;
               dialog(approve ? "确认通过" : "退回申请", f, approve ? "通过" : "退回", () ->
                 mutation(
                   "/api/" +
@@ -1751,7 +1754,7 @@ public class MainActivity extends AppCompatActivity {
                     r.optString("id") +
                     "/review",
                   "POST",
-                  json("approve", approve, "note", note.getText().toString(), "bonus", task && approve && bonus.isChecked()),
+                  json("approve", approve, "note", note.getText().toString(), "bonus", award != null && award.getSelectedItemPosition() == 1, "deduction", award != null && award.getSelectedItemPosition() == 2),
                   false,
                   approve ? "已通过" : "已退回"
                 )

@@ -801,3 +801,60 @@ test('adding homework preserves customized rule versions and daily task snapshot
     10,
   );
 });
+
+test('parents may award one fewer star per completion with atomic accounting and backup restore', async (t) => {
+  const s = await setup(t),
+    d = await s.dashboard();
+  const task = d.tasks.find((t) => t.stars === 2);
+  const one = d.tasks.find((t) => t.stars === 1);
+  const submit = (task, body, token = s.parent.token, key = uid()) =>
+    s.call(`/api/tasks/${task.id}/submit`, 'POST', body, token, key);
+  assert.equal((await submit(task, { deduction: true }, s.child.token)).status, 400);
+  assert.equal((await submit(one, { deduction: true })).status, 400);
+  assert.equal((await submit(task, { deduction: true, bonus: true })).status, 400);
+  const pending = await submit(task, {}, s.child.token);
+  const review = (body) =>
+    s.call(`/api/submissions/${pending.data.id}/review`, 'POST', body, s.parent.token);
+  assert.equal((await review({ approve: false, deduction: true })).status, 400);
+  assert.equal((await review({ approve: true, deduction: true, bonus: true })).status, 400);
+  const results = await Promise.all([
+    review({ approve: true, deduction: true }),
+    review({ approve: true, deduction: true }),
+  ]);
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+  assert.equal((await s.dashboard()).wallet.balance, d.wallet.balance + 1);
+  const another = d.tasks.find((t) => t.stars === 2 && t.id !== task.id);
+  const key = uid();
+  for (let i = 0; i < 2; i++)
+    assert.equal((await submit(another, { deduction: true }, s.parent.token, key)).status, 200);
+  assert.equal((await submit(another, {}, s.parent.token, key)).status, 409);
+  const after = await s.dashboard();
+  assert.equal(after.wallet.balance, d.wallet.balance + 2);
+  assert.equal(after.tasks.find((t) => t.id === task.id).stars, 2);
+  const entry = after.ledger.find((l) => l.kind === 'task' && l.amount === 1);
+  assert.equal(
+    (
+      await s.call(
+        `/api/ledger/${entry.id}/reverse`,
+        'POST',
+        { note: '撤销本次实发星星' },
+        s.parent.token,
+        uid(),
+      )
+    ).status,
+    200,
+  );
+  assert.equal((await s.dashboard()).wallet.balance, d.wallet.balance + 1);
+  const backup = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  assert.equal(
+    (
+      await s.call(
+        '/api/admin/restore',
+        'POST',
+        { backup, password: 'local-admin-2026' },
+        s.admin.token,
+      )
+    ).status,
+    200,
+  );
+});

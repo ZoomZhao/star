@@ -72,6 +72,7 @@ const rows = {
       id,
       task_id: id,
       bonus: bit.default(0),
+      deduction: bit.default(0),
       child_id: id,
       status: z.enum(['pending', 'approved', 'rejected']),
       note: text,
@@ -226,7 +227,7 @@ export function restore(db, input, backupDir) {
         LEFT JOIN redemptions r ON r.id=l.redemption_id
         LEFT JOIN ledger original ON original.id=l.reversal_of
         WHERE (l.kind='task' AND (s.id IS NULL OR s.status!='approved'
-          OR s.child_id!=l.child_id OR l.amount!=t.stars+s.bonus))
+          OR s.child_id!=l.child_id OR l.amount!=t.stars+s.bonus-s.deduction OR (s.bonus=1 AND s.deduction=1) OR l.amount<1))
         OR (l.kind='reward' AND (r.id IS NULL OR r.status!='approved'
           OR r.child_id!=l.child_id OR l.amount!=-r.cost))
         OR (l.kind='reversal' AND (original.id IS NULL OR original.kind='reversal'
@@ -248,7 +249,7 @@ export function restore(db, input, backupDir) {
           candidate,
           `SELECT x.id FROM ${table} x
           LEFT JOIN ledger l ON l.${link}=x.id
-          WHERE ${table === 'submissions' ? "(x.status!='approved' AND x.bonus!=0) OR" : ''} (x.status='approved' AND l.id IS NULL)
+          WHERE ${table === 'submissions' ? "(x.status!='approved' AND (x.bonus!=0 OR x.deduction!=0)) OR" : ''} (x.status='approved' AND l.id IS NULL)
           OR (x.status='pending' AND (x.reviewed_by IS NOT NULL OR x.reviewed_at IS NOT NULL))
           OR (x.status!='pending' AND (x.reviewed_by IS NULL OR x.reviewed_at IS NULL)) LIMIT 1`,
         )

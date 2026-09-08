@@ -54,7 +54,7 @@ npm run android:build
 npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-产物为 `artifacts/star-explorer-native.apk`（0.2.6-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
+产物为 `artifacts/star-explorer-native.apk`（0.2.7-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
 
 发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 
@@ -105,7 +105,7 @@ node scripts/ecs-command.mjs 'journalctl -u star -n 50 --no-pager'
 
 ## 数据与规则
 
-- 语文、数学、英语各有「课内作业」，每天一次，基础 2 星。所有任务在家长审批或代完成时均可选择额外奖励 1 星，默认不选；与基础星星一起结算、撤销。
+- 语文、数学、英语各有「课内作业」，每天一次，基础 2 星。所有任务在家长审批或代完成时均可选择额外奖励 1 星，默认按基础星星发放；基础超过 1 星时还可选择少发 1 星（例如 2 星只发 1 星）。每次确认最低发放 1 星，额外奖励与少发不能同时选择，按实发数量结算、撤销。
 - 存量孩子通过 `node --env-file=/opt/star/server.env server/seed-homework.mjs` 补充三科课内作业，重复运行不会重复添加。
 
 - 北京时间自然日。孩子只能提交当天；家长可以代完成过去日期，不能预先完成未来任务。
