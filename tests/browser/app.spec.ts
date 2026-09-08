@@ -154,6 +154,7 @@ test('remembered login, subject presets, skins, and landscape main actions stay 
   await page.getByRole('button', { name: '换装', exact: true }).click();
   await page.getByRole('button', { name: /公主花园/ }).click();
   await expect(page.locator('html')).toHaveAttribute('data-skin', 'princess');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.screenshot({ path: 'artifacts/web-princess-landscape.png', fullPage: true });
   const another = await context.newPage();
   await another.goto('/');

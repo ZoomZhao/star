@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useId, cloneElement } from 'react';
 import type { FormEvent, ReactNode, ReactElement } from 'react';
+import { AnimatePresence } from 'framer-motion';
+import { Button, InteractionSurface, Modal, SubjectPicker, Toast } from './components/Fluid';
 import {
   Star,
   ClipboardList,
@@ -123,40 +125,6 @@ function Empty({ children }: { children: ReactNode }) {
     </div>
   );
 }
-function Modal({
-  title,
-  children,
-  close,
-}: {
-  title: string;
-  children: ReactNode;
-  close: () => void;
-}) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = ref.current;
-    dialog?.showModal();
-    return () => dialog?.close();
-  }, []);
-  return (
-    <dialog
-      ref={ref}
-      className="modal"
-      onCancel={close}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) close();
-      }}
-    >
-      <div className="modal-head">
-        <h2>{title}</h2>
-        <button className="icon-btn" aria-label="关闭" onClick={close}>
-          <X />
-        </button>
-      </div>
-      {children}
-    </dialog>
-  );
-}
 function Field({ label, children }: { label: string; children: ReactNode }) {
   const fieldId = useId();
   return (
@@ -246,9 +214,9 @@ function Login({ done }: { done: (u: User) => void }) {
                 {error}
               </div>
             )}
-            <button className="primary full" disabled={busy}>
-              {busy ? '正在进入…' : '出发，去星星岛'} <ChevronRight size={19} />
-            </button>
+            <Button className="primary full" loading={busy}>
+              出发，去星星岛 <ChevronRight size={19} />
+            </Button>
           </form>
           <p className="login-tip">
             <LockKeyhole size={14} /> 账号由管理员提前分配，无需注册
@@ -262,17 +230,17 @@ function Login({ done }: { done: (u: User) => void }) {
                   ['parent', 'parent123', '家长'],
                   ['admin', 'local-admin-2026', '管理员'],
                 ].map(([u, p, label]) => (
-                  <button key={u} disabled={busy} onClick={() => login(undefined, u, p)}>
+                  <Button key={u} disabled={busy} onClick={() => login(undefined, u, p)}>
                     {label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
           )}
           {isNative && (
-            <button className="text-btn" onClick={() => setConfig(!config)}>
+            <Button className="text-btn" onClick={() => setConfig(!config)}>
               配置服务器地址
-            </button>
+            </Button>
           )}
           {config && (
             <form
@@ -297,7 +265,7 @@ function Login({ done }: { done: (u: User) => void }) {
                   placeholder="https://stars.example.com"
                 />
               </Field>
-              <button className="secondary full">保存地址</button>
+              <Button className="secondary full">保存地址</Button>
             </form>
           )}
         </div>
@@ -345,17 +313,7 @@ export default function App() {
   const filteredTasks = data?.tasks.filter((t) => subject === 'all' || t.subject === subject) || [];
   const visiblePage = Math.min(taskPage, Math.max(0, Math.ceil(filteredTasks.length / 4) - 1));
   const subjectPicker = (
-    <div className="subject-tabs" aria-label="科目分类">
-      {Object.entries({ all: '全部', ...subjects }).map(([key, label]) => (
-        <button
-          key={key}
-          className={key === subject ? 'active' : ''}
-          onClick={() => setSubject(key)}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
+    <SubjectPicker options={{ all: '全部', ...subjects }} value={subject} onChange={setSubject} />
   );
   const working = useRef(false),
     lastBalance = useRef<number | null>(null),
@@ -462,12 +420,6 @@ export default function App() {
       document.removeEventListener('visibilitychange', tick);
     };
   }, [user, childId, refresh, date]);
-  useEffect(() => {
-    if (notice) {
-      const t = setTimeout(() => setNotice(''), 5500);
-      return () => clearTimeout(t);
-    }
-  }, [notice]);
   async function logout() {
     await api('/api/logout', 'POST').catch(() => {});
     await saveToken('');
@@ -566,16 +518,20 @@ export default function App() {
         ];
   if (loading)
     return (
-      <div className="boot">
+      <div className="boot" role="status">
         <StarIcon size={52} />
         <p>星星岛准备中…</p>
       </div>
     );
   if (!user) return <Login done={setUser} />;
   return (
-    <div className={`app ${isParent ? 'parent-app' : 'child-app'} page-${page}`}>
+    <InteractionSurface
+      busy={busy}
+      error={error}
+      className={`app ${isParent ? 'parent-app' : 'child-app'} page-${page}`}
+    >
       <header className="topbar">
-        <button className="identity" onClick={() => setDialog({ type: 'settings' })}>
+        <Button className="identity" onClick={() => setDialog({ type: 'settings' })}>
           <div className="avatar">
             {user.role === 'child' ? '🦖' : user.role === 'parent' ? '🌿' : '🛡️'}
           </div>
@@ -589,45 +545,51 @@ export default function App() {
             </strong>
             <span>{user.role === 'child' ? '每天一点点，一起变更棒' : user.name}</span>
           </div>
-        </button>
+        </Button>
         <div className="top-date">
           <CalendarDays size={17} />
           {dateText(date)}
         </div>
         <div className="top-actions">
-          <button className="secondary" onClick={() => setSkinOpen(true)}>
+          <Button className="secondary" onClick={() => setSkinOpen(true)}>
             换装
-          </button>
-          <button
+          </Button>
+          <Button
             className="icon-btn sound-toggle"
             aria-label={sound ? '关闭音效' : '打开音效'}
+            aria-pressed={sound}
             onClick={() => {
               setSound(!sound);
               localStorage.setItem('star-sound', String(!sound));
             }}
           >
             {sound ? <Volume2 /> : <VolumeX />}
-          </button>
-          <button
+          </Button>
+          <Button
             className="icon-btn"
             aria-label="设置"
             onClick={() => setDialog({ type: 'settings' })}
           >
             <Settings />
-          </button>
+          </Button>
           {data && (
-            <button className="balance-pill" onClick={() => setPage('wallet')}>
+            <Button
+              className="balance-pill"
+              aria-label={`可用 ${data.wallet.balance} 颗星星，查看星星口袋`}
+              onClick={() => setPage('wallet')}
+            >
               <StarIcon />
               <strong>{data.wallet.balance}</strong>
-            </button>
+            </Button>
           )}
         </div>
       </header>
       <nav className="navigation" aria-label="主导航">
         {nav.map((n) => (
-          <button
+          <Button
             key={n.id}
             className={page === n.id ? 'active' : ''}
+            aria-current={page === n.id ? 'page' : undefined}
             onClick={() => {
               setPage(n.id);
               setError('');
@@ -636,21 +598,21 @@ export default function App() {
             <n.icon size={27} />
             <span>{n.title}</span>
             {n.id === 'review' && pending > 0 && <b className="badge">{pending}</b>}
-          </button>
+          </Button>
         ))}
-        <button className="nav-account" onClick={() => setDialog({ type: 'settings' })}>
+        <Button className="nav-account" onClick={() => setDialog({ type: 'settings' })}>
           <Users size={24} />
           <span>{isParent ? '账号设置' : '家长入口'}</span>
-        </button>
+        </Button>
       </nav>
       <main className="workspace">
         {!online && <div className="error">网络已断开。请恢复连接后提交任务。</div>}
         {error && (
           <div className="error global-error" role="alert">
             {error}
-            <button aria-label="关闭错误" onClick={() => setError('')}>
+            <Button aria-label="关闭错误" onClick={() => setError('')}>
               <X size={16} />
-            </button>
+            </Button>
           </div>
         )}
         {user.role !== 'child' && user.role !== 'admin' && (
@@ -667,12 +629,12 @@ export default function App() {
                 </option>
               ))}
             </select>
-            <button
+            <Button
               className="text-btn"
               onClick={() => refresh().catch((e) => setError(e.message))}
             >
               <RefreshCw size={15} /> 刷新
-            </button>
+            </Button>
           </div>
         )}
         {user.role === 'admin' ? (
@@ -681,22 +643,22 @@ export default function App() {
           <Empty>
             {childrenLoaded ? '还没有分配小朋友，请联系管理员。' : '正在加载家庭信息…'}
             {(childrenLoaded || error) && (
-              <button className="secondary" onClick={() => setChildrenRetry((n) => n + 1)}>
+              <Button className="secondary" onClick={() => setChildrenRetry((n) => n + 1)}>
                 重新加载
-              </button>
+              </Button>
             )}
           </Empty>
         ) : !data ? (
-          <div className="loading-panel">
+          <div className="loading-panel" role="status">
             <StarIcon size={38} />
             <p>正在寻找今天的星星…</p>
             {error && (
-              <button
+              <Button
                 className="secondary"
                 onClick={() => refresh().catch((e) => setError(e.message))}
               >
                 重新加载
-              </button>
+              </Button>
             )}
           </div>
         ) : (
@@ -728,7 +690,7 @@ export default function App() {
                     <h1>{skin === 'princess' ? '星星公主' : '星星探险家'}</h1>
                     <p>✦ 今天也要闪闪发光 ✦</p>
                   </div>
-                  <button
+                  <Button
                     className="dino-touch"
                     aria-label="和小恐龙打招呼"
                     onClick={() => {
@@ -780,7 +742,16 @@ export default function App() {
                         <Leaf /> {date === data.today ? '今日任务' : '每日任务'}
                       </h2>
                     </div>
-                    <label className="date-input" title="选择日期">
+                    <div className="date-input">
+                      {date !== data.today && (
+                        <Button
+                          type="button"
+                          className="return-today"
+                          onClick={() => setDate(data.today)}
+                        >
+                          回到今天
+                        </Button>
+                      )}
                       <CalendarDays size={18} />
                       <input
                         type="date"
@@ -790,7 +761,7 @@ export default function App() {
                         }}
                         aria-label="任务日期"
                       />
-                    </label>
+                    </div>
                   </div>
                   <DateStrip date={date} today={data.today} setDate={setDate} />
                   <div className="subject-control">{subjectPicker}</div>
@@ -803,13 +774,13 @@ export default function App() {
                         <div className="task-main">
                           <Tile icon={t.icon} subject={t.subject} />
                           <div className="task-copy">
-                            <button
+                            <Button
                               className="task-title"
                               onClick={() => setDialog({ type: 'task', task: t })}
                             >
                               {t.title}
                               <Info size={14} />
-                            </button>
+                            </Button>
                             <p>
                               每次 <b>{t.stars}</b> 星 · 每天最多 <b>{t.daily_limit}</b> 次
                             </p>
@@ -848,7 +819,7 @@ export default function App() {
                               <>{t.approved > 0 ? '继续加油' : '小小行动，大大成长'}</>
                             )}
                           </span>
-                          <button
+                          <Button
                             className={
                               t.approved >= t.daily_limit
                                 ? 'done-button'
@@ -875,7 +846,7 @@ export default function App() {
                                     ? '代为完成'
                                     : '我完成啦'}
                             {t.approved + t.pending < t.daily_limit && <ChevronRight size={16} />}
-                          </button>
+                          </Button>
                         </div>
                       </article>
                     ))}
@@ -887,24 +858,24 @@ export default function App() {
                         : '还没有任务，请家长来安排今天的小冒险吧。'}
                     </Empty>
                   )}
-                  <div className="task-pagination">
-                    <button
+                  <div className="task-pagination" aria-label="任务分页">
+                    <Button
                       className="secondary"
                       disabled={visiblePage === 0}
                       onClick={() => setTaskPage(visiblePage - 1)}
                     >
                       上一页
-                    </button>
-                    <span>
+                    </Button>
+                    <span aria-live="polite" aria-atomic="true">
                       {visiblePage + 1} / {Math.max(1, Math.ceil(filteredTasks.length / 4))}
                     </span>
-                    <button
+                    <Button
                       className="secondary"
                       disabled={(visiblePage + 1) * 4 >= filteredTasks.length}
                       onClick={() => setTaskPage(visiblePage + 1)}
                     >
                       下一页
-                    </button>
+                    </Button>
                   </div>
                   <div className="daily-summary">
                     <div>
@@ -981,9 +952,9 @@ export default function App() {
                       </div>
                     </div>
                     {isParent && (
-                      <button className="primary full" onClick={() => setDialog({ type: 'entry' })}>
+                      <Button className="primary full" onClick={() => setDialog({ type: 'entry' })}>
                         <Plus size={19} /> 记一笔星星
-                      </button>
+                      </Button>
                     )}
                   </section>
                   <Ledger
@@ -1002,9 +973,9 @@ export default function App() {
                   icon={<Store />}
                   action={
                     isParent ? (
-                      <button className="primary" onClick={() => setDialog({ type: 'reward' })}>
+                      <Button className="primary" onClick={() => setDialog({ type: 'reward' })}>
                         <Plus size={17} /> 添加奖励
-                      </button>
+                      </Button>
                     ) : undefined
                   }
                 />
@@ -1023,9 +994,9 @@ export default function App() {
                       </select>
                     </label>
                     <p>奖励由本家庭共用，下架后可重新上架。</p>
-                    <button className="secondary" onClick={() => setPage('review')}>
+                    <Button className="secondary" onClick={() => setPage('review')}>
                       审核兑换申请
-                    </button>
+                    </Button>
                   </div>
                 )}
                 <div className="shop-banner">
@@ -1071,7 +1042,7 @@ export default function App() {
                               <StarIcon size={20} />
                               {r.cost}
                             </strong>
-                            <button
+                            <Button
                               className="secondary"
                               disabled={
                                 busy ||
@@ -1094,10 +1065,10 @@ export default function App() {
                                   : r.cost > data.wallet.balance
                                     ? `还差 ${r.cost - data.wallet.balance} 星`
                                     : '我想兑换'}
-                            </button>
+                            </Button>
                           </div>
                           {isParent && (
-                            <button
+                            <Button
                               className="secondary reward-status-action"
                               disabled={busy || !online}
                               onClick={() =>
@@ -1115,7 +1086,7 @@ export default function App() {
                               }
                             >
                               {r.active ? '下架奖励' : '重新上架'}
-                            </button>
+                            </Button>
                           )}
                         </article>
                       );
@@ -1188,20 +1159,20 @@ export default function App() {
                           </div>
                           <div className="review-actions">
                             <small>{timeText(s.created_at)} 提交</small>
-                            <button
+                            <Button
                               className="secondary"
                               disabled={busy}
                               onClick={() => review(s.id, false)}
                             >
                               退回
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               className="primary"
                               disabled={busy}
                               onClick={() => review(s.id, true)}
                             >
                               <Check size={16} /> 通过 +{s.stars}
-                            </button>
+                            </Button>
                           </div>
                         </article>
                       ))
@@ -1230,20 +1201,20 @@ export default function App() {
                             </div>
                           </div>
                           <div className="review-actions">
-                            <button
+                            <Button
                               className="secondary"
                               disabled={busy}
                               onClick={() => review(r.id, false, 'redemptions')}
                             >
                               退回
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               className="primary"
                               disabled={busy}
                               onClick={() => review(r.id, true, 'redemptions')}
                             >
                               确认兑换
-                            </button>
+                            </Button>
                           </div>
                         </article>
                       ))}
@@ -1261,9 +1232,9 @@ export default function App() {
                   title="任务规则"
                   icon={<ClipboardList />}
                   action={
-                    <button className="primary" onClick={() => setDialog({ type: 'rule' })}>
+                    <Button className="primary" onClick={() => setDialog({ type: 'rule' })}>
                       <Plus size={17} /> 添加任务
-                    </button>
+                    </Button>
                   }
                 />
                 <div className="info-strip">
@@ -1288,13 +1259,13 @@ export default function App() {
                               每次 {r.stars} 星 · 每日上限 {r.daily_limit} 次
                             </p>
                           </div>
-                          <button
+                          <Button
                             className="icon-btn"
                             aria-label={`编辑${r.title}`}
                             onClick={() => setDialog({ type: 'rule', rule: r })}
                           >
                             <Pencil size={18} />
-                          </button>
+                          </Button>
                         </div>
                         <p className="rule-description">{r.description || '暂无补充说明'}</p>
                         <div className="rule-meta">
@@ -1322,213 +1293,208 @@ export default function App() {
           </>
         )}
       </main>
-      {skinOpen && (
-        <Modal title="我的换装间" close={() => setSkinOpen(false)}>
-          <div className="skin-options">
-            {[
-              ['dino', '恐龙探险', 'island-portrait'],
-              ['princess', '公主花园', 'princess-hero'],
-            ].map(([key, name, asset]) => (
-              <button
-                key={key}
-                className={key === skin ? 'chosen' : ''}
-                onClick={() => {
-                  setSkin(key);
-                  setSkinOpen(false);
-                }}
-              >
-                <img src={`/assets/${asset}.webp`} alt={name} />
-                <strong>{name}</strong>
-                <span>{key === skin ? '正在使用' : '使用这套皮肤'}</span>
-              </button>
-            ))}
-          </div>
-        </Modal>
-      )}
-      {notice && (
-        <div className="toast" role="status">
-          <Sparkles size={20} />
-          {notice}
-        </div>
-      )}
-      {dialog && (
-        <Modal
-          title={
-            dialog.type === 'task'
-              ? dialog.task.title
-              : dialog.type === 'rule'
-                ? dialog.task
-                  ? '编辑单日任务'
-                  : dialog.rule
-                    ? '编辑任务模板'
-                    : '添加任务模板'
-                : dialog.type === 'reward'
-                  ? dialog.reward
-                    ? '编辑奖励'
-                    : '添加奖励'
-                  : dialog.type === 'redeem'
-                    ? '兑换一个小心愿'
-                    : dialog.type === 'entry'
-                      ? '记一笔星星'
-                      : dialog.type === 'reverse'
-                        ? '撤销这笔流水'
-                        : dialog.type === 'settings'
-                          ? '账号与设置'
-                          : dialog.title
-          }
-          close={() => {
-            if (!busy) setDialog(null);
-          }}
-        >
-          {error && (
-            <div className="error" role="alert">
-              {error}
+      <AnimatePresence>
+        {skinOpen && (
+          <Modal title="我的换装间" close={() => setSkinOpen(false)}>
+            <div className="skin-options">
+              {[
+                ['dino', '恐龙探险', 'island-portrait'],
+                ['princess', '公主花园', 'princess-hero'],
+              ].map(([key, name, asset]) => (
+                <Button
+                  key={key}
+                  className={key === skin ? 'chosen' : ''}
+                  aria-pressed={key === skin}
+                  onClick={() => {
+                    setSkin(key);
+                    setSkinOpen(false);
+                  }}
+                >
+                  <img src={`/assets/${asset}.webp`} alt={name} />
+                  <strong>{name}</strong>
+                  <span>{key === skin ? '正在使用' : '使用这套皮肤'}</span>
+                </Button>
+              ))}
             </div>
-          )}
-          {dialog.type === 'task' && (
-            <TaskDetail
-              task={dialog.task}
-              parent={!!isParent}
-              busy={busy}
-              today={data?.today || currentDate()}
-              submit={(note) => submitTask(dialog.task, note)}
-              edit={() => setDialog({ type: 'rule', task: dialog.task })}
-            />
-          )}
-          {dialog.type === 'rule' && (
-            <RuleForm
-              rule={dialog.rule}
-              task={dialog.task}
-              busy={busy}
-              save={async (v) => {
-                const d = dialog;
-                const ok = await act(
-                  () =>
-                    api(
-                      d.task
-                        ? `/api/tasks/${d.task.id}`
-                        : d.rule
-                          ? `/api/rules/${d.rule.rule_key}`
-                          : `/api/children/${childId}/rules`,
-                      d.task || d.rule ? 'PATCH' : 'POST',
-                      v,
-                    ),
-                  '规则已保存',
-                );
-                if (ok) setDialog(null);
-              }}
-            />
-          )}
-          {dialog.type === 'reward' && (
-            <RewardForm
-              reward={dialog.reward}
-              busy={busy}
-              save={async (v) => {
-                const r = dialog.reward;
-                const ok = await act(
-                  () =>
-                    api(
-                      r ? `/api/rewards/${r.id}` : `/api/children/${childId}/rewards`,
-                      r ? 'PATCH' : 'POST',
-                      v,
-                    ),
-                  '奖励已保存',
-                );
-                if (ok) setDialog(null);
-              }}
-            />
-          )}
-          {dialog.type === 'redeem' && (
-            <div className="redeem-confirm">
-              <Tile icon={dialog.reward.icon} size="large" />
-              <h3>{dialog.reward.title}</h3>
-              <p>
-                家长确认后会消耗 <b>{dialog.reward.cost}</b> 颗星星。
-              </p>
-              <p className="muted">
-                当前余额 {data?.wallet.balance} 星，确认后剩余{' '}
-                {(data?.wallet.balance || 0) - dialog.reward.cost} 星。
-              </p>
-              <button
-                className="primary full"
-                disabled={busy}
-                onClick={async () => {
+          </Modal>
+        )}
+      </AnimatePresence>
+      <Toast message={notice} dismiss={() => setNotice('')} />
+      <AnimatePresence>
+        {dialog && (
+          <Modal
+            title={
+              dialog.type === 'task'
+                ? dialog.task.title
+                : dialog.type === 'rule'
+                  ? dialog.task
+                    ? '编辑单日任务'
+                    : dialog.rule
+                      ? '编辑任务模板'
+                      : '添加任务模板'
+                  : dialog.type === 'reward'
+                    ? dialog.reward
+                      ? '编辑奖励'
+                      : '添加奖励'
+                    : dialog.type === 'redeem'
+                      ? '兑换一个小心愿'
+                      : dialog.type === 'entry'
+                        ? '记一笔星星'
+                        : dialog.type === 'reverse'
+                          ? '撤销这笔流水'
+                          : dialog.type === 'settings'
+                            ? '账号与设置'
+                            : dialog.title
+            }
+            close={() => {
+              if (!busy) setDialog(null);
+            }}
+          >
+            {dialog.type === 'task' && (
+              <TaskDetail
+                task={dialog.task}
+                parent={!!isParent}
+                busy={busy}
+                today={data?.today || currentDate()}
+                submit={(note) => submitTask(dialog.task, note)}
+                edit={() => setDialog({ type: 'rule', task: dialog.task })}
+              />
+            )}
+            {dialog.type === 'rule' && (
+              <RuleForm
+                rule={dialog.rule}
+                task={dialog.task}
+                busy={busy}
+                save={async (v) => {
+                  const d = dialog;
                   const ok = await act(
                     () =>
                       api(
-                        `/api/children/${childId}/redemptions`,
-                        'POST',
-                        { reward_id: dialog.reward.id },
-                        requestId(),
+                        d.task
+                          ? `/api/tasks/${d.task.id}`
+                          : d.rule
+                            ? `/api/rules/${d.rule.rule_key}`
+                            : `/api/children/${childId}/rules`,
+                        d.task || d.rule ? 'PATCH' : 'POST',
+                        v,
                       ),
-                    '心愿已送达，等家长确认吧',
+                    '规则已保存',
                   );
-                  if (ok) {
-                    feedback();
-                    setDialog(null);
-                  }
+                  if (ok) setDialog(null);
+                }}
+              />
+            )}
+            {dialog.type === 'reward' && (
+              <RewardForm
+                reward={dialog.reward}
+                busy={busy}
+                save={async (v) => {
+                  const r = dialog.reward;
+                  const ok = await act(
+                    () =>
+                      api(
+                        r ? `/api/rewards/${r.id}` : `/api/children/${childId}/rewards`,
+                        r ? 'PATCH' : 'POST',
+                        v,
+                      ),
+                    '奖励已保存',
+                  );
+                  if (ok) setDialog(null);
+                }}
+              />
+            )}
+            {dialog.type === 'redeem' && (
+              <div className="redeem-confirm">
+                <Tile icon={dialog.reward.icon} size="large" />
+                <h3>{dialog.reward.title}</h3>
+                <p>
+                  家长确认后会消耗 <b>{dialog.reward.cost}</b> 颗星星。
+                </p>
+                <p className="muted">
+                  当前余额 {data?.wallet.balance} 星，确认后剩余{' '}
+                  {(data?.wallet.balance || 0) - dialog.reward.cost} 星。
+                </p>
+                <Button
+                  className="primary full"
+                  loading={busy}
+                  onClick={async () => {
+                    const ok = await act(
+                      () =>
+                        api(
+                          `/api/children/${childId}/redemptions`,
+                          'POST',
+                          { reward_id: dialog.reward.id },
+                          requestId(),
+                        ),
+                      '心愿已送达，等家长确认吧',
+                    );
+                    if (ok) {
+                      feedback();
+                      setDialog(null);
+                    }
+                  }}
+                >
+                  请家长帮我兑换
+                </Button>
+              </div>
+            )}
+            {dialog.type === 'entry' && (
+              <EntryForm
+                busy={busy}
+                save={async (v) => {
+                  const ok = await act(
+                    () => api(`/api/children/${childId}/ledger`, 'POST', v, requestId()),
+                    '星星流水已记录',
+                  );
+                  if (ok) setDialog(null);
+                }}
+              />
+            )}
+            {dialog.type === 'reverse' && (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const note = String(new FormData(e.currentTarget).get('note'));
+                  const ok = await act(
+                    () => api(`/api/ledger/${dialog.entry.id}/reverse`, 'POST', { note }),
+                    '已追加反向流水',
+                  );
+                  if (ok) setDialog(null);
                 }}
               >
-                请家长帮我兑换
-              </button>
-            </div>
-          )}
-          {dialog.type === 'entry' && (
-            <EntryForm
-              busy={busy}
-              save={async (v) => {
-                const ok = await act(
-                  () => api(`/api/children/${childId}/ledger`, 'POST', v, requestId()),
-                  '星星流水已记录',
-                );
-                if (ok) setDialog(null);
-              }}
-            />
-          )}
-          {dialog.type === 'reverse' && (
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const note = String(new FormData(e.currentTarget).get('note'));
-                const ok = await act(
-                  () => api(`/api/ledger/${dialog.entry.id}/reverse`, 'POST', { note }),
-                  '已追加反向流水',
-                );
-                if (ok) setDialog(null);
-              }}
-            >
-              <p>
-                撤销「{dialog.entry.title}」，将{dialog.entry.amount > 0 ? '扣回' : '返还'}{' '}
-                {Math.abs(dialog.entry.amount)} 星。原记录会保留。
-              </p>
-              <Field label="撤销原因">
-                <input name="note" required maxLength={100} />
-              </Field>
-              <button className="primary full" disabled={busy}>
-                确认撤销
-              </button>
-            </form>
-          )}
-          {dialog.type === 'settings' && (
-            <SettingsPanel user={user} logout={logout} busy={busy} act={act} />
-          )}
-          {dialog.type === 'celebrate' && (
-            <div className="celebration">
-              <div className="celebration-star">
-                <StarIcon size={95} />
-                <span>✧</span>
-                <i>✦</i>
+                <p>
+                  撤销「{dialog.entry.title}」，将{dialog.entry.amount > 0 ? '扣回' : '返还'}{' '}
+                  {Math.abs(dialog.entry.amount)} 星。原记录会保留。
+                </p>
+                <Field label="撤销原因">
+                  <input name="note" required maxLength={100} />
+                </Field>
+                <Button className="primary full" loading={busy}>
+                  确认撤销
+                </Button>
+              </form>
+            )}
+            {dialog.type === 'settings' && (
+              <SettingsPanel user={user} logout={logout} busy={busy} act={act} />
+            )}
+            {dialog.type === 'celebrate' && (
+              <div className="celebration">
+                <div className="celebration-star">
+                  <StarIcon size={95} />
+                  <span>✧</span>
+                  <i>✦</i>
+                </div>
+                <h3>{dialog.title}</h3>
+                <p>{dialog.text}</p>
+                <Button className="primary full" onClick={() => setDialog(null)}>
+                  继续我的探险 <ChevronRight size={18} />
+                </Button>
               </div>
-              <h3>{dialog.title}</h3>
-              <p>{dialog.text}</p>
-              <button className="primary full" onClick={() => setDialog(null)}>
-                继续我的探险 <ChevronRight size={18} />
-              </button>
-            </div>
-          )}
-        </Modal>
-      )}
-    </div>
+            )}
+          </Modal>
+        )}
+      </AnimatePresence>
+    </InteractionSurface>
   );
 }
 function PageHeading({
@@ -1565,23 +1531,33 @@ function DateStrip({
   setDate: (s: string) => void;
 }) {
   return (
-    <div className="date-strip">
-      <button className="date-arrow" aria-label="前一周" onClick={() => setDate(shift(date, -7))}>
+    <div className="date-strip" role="group" aria-label="选择任务日期">
+      <Button className="date-arrow" aria-label="前一周" onClick={() => setDate(shift(date, -7))}>
         <ChevronLeft size={16} />
-      </button>
-      {Array.from({ length: 7 }, (_, i) => shift(date, i - 3)).map((d) => (
-        <button key={d} onClick={() => setDate(d)} className={date === d ? 'selected' : ''}>
+      </Button>
+      {Array.from({ length: 7 }, (_, i) =>
+        shift(date, i - ((new Date(date + 'T12:00:00Z').getUTCDay() + 6) % 7)),
+      ).map((d) => (
+        <Button
+          key={d}
+          type="button"
+          onClick={() => setDate(d)}
+          className={date === d ? 'selected' : ''}
+          aria-label={dateText(d)}
+          aria-pressed={date === d}
+          aria-current={d === today ? 'date' : undefined}
+        >
           <span>
             {d === today ? '今天' : '周' + weekdays[new Date(d + 'T12:00:00Z').getUTCDay()]}
           </span>
           <strong>
             {Number(d.slice(5, 7))}.{Number(d.slice(8))}
           </strong>
-        </button>
+        </Button>
       ))}
-      <button className="date-arrow" aria-label="后一周" onClick={() => setDate(shift(date, 7))}>
+      <Button className="date-arrow" aria-label="后一周" onClick={() => setDate(shift(date, 7))}>
         <ChevronRight size={16} />
-      </button>
+      </Button>
     </div>
   );
 }
@@ -1621,9 +1597,9 @@ function Ledger({
           onChange={(e) => setDay(e.target.value)}
         />
         {day && (
-          <button className="text-btn" onClick={() => setDay('')}>
+          <Button className="text-btn" onClick={() => setDay('')}>
             查看全部
-          </button>
+          </Button>
         )}
       </div>
       {rows.length ? (
@@ -1655,9 +1631,9 @@ function Ledger({
                 <StarIcon size={15} />
               </strong>
               {isParent && e.kind !== 'reversal' && !e.reversed_by && (
-                <button className="text-btn" onClick={() => reverse(e)}>
+                <Button className="text-btn" onClick={() => reverse(e)}>
                   撤销
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -1731,19 +1707,15 @@ function TaskDetail({
                 placeholder="例如：今天我读了两页绘本！"
               />
             </Field>
-            <button className="primary full" disabled={busy}>
-              {busy
-                ? '正在提交…'
-                : parent
-                  ? `代完成 1 次，发放 ${t.stars} 星`
-                  : '我完成了 1 次，请家长确认'}
-            </button>
+            <Button className="primary full" loading={busy}>
+              {parent ? `代完成 1 次，发放 ${t.stars} 星` : '我完成了 1 次，请家长确认'}
+            </Button>
           </form>
         )}
       {parent && t.date >= today && !t.submissions.length && (
-        <button className="text-btn full" onClick={edit}>
+        <Button className="text-btn full" onClick={edit}>
           <Pencil size={15} /> 编辑这一天的任务规则
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -1886,16 +1858,17 @@ function RuleForm({
             {schedule === 'weekly' && (
               <div className="weekday-picks">
                 {[1, 2, 3, 4, 5, 6, 0].map((n) => (
-                  <button
+                  <Button
                     type="button"
                     className={days.includes(n) ? 'selected' : ''}
+                    aria-pressed={days.includes(n)}
                     key={n}
                     onClick={() =>
                       setDays(days.includes(n) ? days.filter((x) => x !== n) : [...days, n])
                     }
                   >
                     周{weekdays[n]}
-                  </button>
+                  </Button>
                 ))}
               </div>
             )}
@@ -1921,9 +1894,9 @@ function RuleForm({
             </p>
           </>
         )}
-        <button className="primary full" disabled={busy}>
-          {busy ? '正在保存…' : '保存任务规则'}
-        </button>
+        <Button className="primary full" loading={busy}>
+          保存任务规则
+        </Button>
       </form>
     </>
   );
@@ -1988,9 +1961,9 @@ function RewardForm({
         <input type="checkbox" name="active" defaultChecked={reward ? !!reward.active : true} />{' '}
         在奖励小铺上架
       </label>
-      <button className="primary full" disabled={busy}>
+      <Button className="primary full" loading={busy}>
         保存奖励
-      </button>
+      </Button>
     </form>
   );
 }
@@ -2024,9 +1997,9 @@ function EntryForm({ busy, save }: { busy: boolean; save: (v: unknown) => void }
       <Field label="补充说明">
         <textarea name="note" maxLength={1000} />
       </Field>
-      <button className="primary full" disabled={busy}>
+      <Button className="primary full" loading={busy}>
         确认记账
-      </button>
+      </Button>
     </form>
   );
 }
@@ -2054,10 +2027,10 @@ function SettingsPanel({
           </p>
         </div>
       </div>
-      <button className="settings-row" onClick={() => setChange(!change)}>
+      <Button className="settings-row" onClick={() => setChange(!change)}>
         <LockKeyhole size={20} /> 修改密码
         <ChevronRight size={18} />
-      </button>
+      </Button>
       {change && (
         <form
           onSubmit={async (e) => {
@@ -2085,18 +2058,18 @@ function SettingsPanel({
               autoComplete="new-password"
             />
           </Field>
-          <button className="primary full" disabled={busy}>
+          <Button className="primary full" loading={busy}>
             保存并重新登录
-          </button>
+          </Button>
         </form>
       )}
       <div className="info-strip">
         <ShieldCheck size={19} />
         <span>家长入口需要家长账号登录。星星到账与消费都由家长确认。</span>
       </div>
-      <button className="secondary full" onClick={logout}>
+      <Button className="secondary full" onClick={logout}>
         <LogOut size={18} /> 退出 / 更换账号
-      </button>
+      </Button>
       <p className="footnote">星星探险家 v0.1 · 日期按北京时间计算</p>
     </div>
   );
@@ -2152,9 +2125,9 @@ function AdminPanel({
             <Field label="家庭名称">
               <input name="name" placeholder="例如：小星一家" required maxLength={100} />
             </Field>
-            <button className="primary" disabled={busy}>
+            <Button className="primary" disabled={busy}>
               <Plus size={17} /> 创建家庭
-            </button>
+            </Button>
           </form>
           <div className="family-tags">
             {accounts.families.map((f) => (
@@ -2226,9 +2199,9 @@ function AdminPanel({
                 autoComplete="new-password"
               />
             </Field>
-            <button className="primary" disabled={busy}>
+            <Button className="primary" disabled={busy}>
               分配账号
-            </button>
+            </Button>
           </form>
         </section>
         <section className="card account-list">
@@ -2250,7 +2223,7 @@ function AdminPanel({
               </div>
               {u.role !== 'admin' && (
                 <div className="account-controls">
-                  <button
+                  <Button
                     className="text-btn"
                     disabled={busy}
                     onClick={async () => {
@@ -2262,7 +2235,7 @@ function AdminPanel({
                     }}
                   >
                     {u.active ? '停用' : '启用'}
-                  </button>
+                  </Button>
                   <ResetPassword user={u} busy={busy} act={act} />
                 </div>
               )}
@@ -2276,7 +2249,7 @@ function AdminPanel({
           <p className="muted">
             完整备份包含家庭、账号、任务规则、审批记录与星星流水。请妥善保管下载文件。
           </p>
-          <button
+          <Button
             className="primary full"
             disabled={busy}
             onClick={() =>
@@ -2294,7 +2267,7 @@ function AdminPanel({
             }
           >
             <Download size={18} /> 下载完整备份
-          </button>
+          </Button>
           <hr />
           <form
             onSubmit={async (e) => {
@@ -2341,9 +2314,9 @@ function AdminPanel({
             <label className="check-field">
               <input type="checkbox" required /> 我确认用此备份替换当前数据
             </label>
-            <button className="secondary full" disabled={busy || !backup}>
+            <Button className="secondary full" disabled={busy || !backup}>
               <Upload size={18} /> 确认恢复备份
-            </button>
+            </Button>
           </form>
         </section>
       </div>
@@ -2362,33 +2335,35 @@ function ResetPassword({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button className="text-btn" onClick={() => setOpen(true)}>
+      <Button className="text-btn" onClick={() => setOpen(true)}>
         重置密码
-      </button>
-      {open && (
-        <Modal title={`重置 ${user.name} 的密码`} close={() => setOpen(false)}>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const password = new FormData(e.currentTarget).get('password');
-              if (
-                await act(
-                  () => api(`/api/admin/users/${user.id}`, 'PATCH', { password }),
-                  '密码已重置，原登录已失效',
+      </Button>
+      <AnimatePresence>
+        {open && (
+          <Modal title={`重置 ${user.name} 的密码`} close={() => setOpen(false)}>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const password = new FormData(e.currentTarget).get('password');
+                if (
+                  await act(
+                    () => api(`/api/admin/users/${user.id}`, 'PATCH', { password }),
+                    '密码已重置，原登录已失效',
+                  )
                 )
-              )
-                setOpen(false);
-            }}
-          >
-            <Field label="新密码（至少 8 位）">
-              <input type="password" name="password" required minLength={8} maxLength={200} />
-            </Field>
-            <button className="primary full" disabled={busy}>
-              确认重置
-            </button>
-          </form>
-        </Modal>
-      )}
+                  setOpen(false);
+              }}
+            >
+              <Field label="新密码（至少 8 位）">
+                <input type="password" name="password" required minLength={8} maxLength={200} />
+              </Field>
+              <Button className="primary full" loading={busy}>
+                确认重置
+              </Button>
+            </form>
+          </Modal>
+        )}
+      </AnimatePresence>
     </>
   );
 }

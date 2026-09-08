@@ -12,6 +12,10 @@
   --border: #e9dfbe;
   --gold: #ffd25e;
   --shadow: 0 3px 0 #9f89300a, 0 5px 16px #5f512708;
+  --motion-fast: 80ms;
+  --motion-moderate: 160ms;
+  --motion-slow: 240ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   font-size: 15px;
 }
 * {
@@ -19,6 +23,10 @@
 }
 body {
   margin: 0;
+}
+body:has(dialog[open]) {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 button,
 input,
@@ -37,8 +45,11 @@ textarea {
   outline-offset: 4px;
 }
 button:focus-visible,
-a:focus-visible {
-  outline: 3px solid #77b9de;
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--green);
 }
 button {
   border: 0;
@@ -49,12 +60,11 @@ button {
   justify-content: center;
   gap: 7px;
   transition:
-    transform 0.15s,
-    background 0.15s,
-    box-shadow 0.15s;
-}
-button:active:not(:disabled) {
-  transform: translateY(2px) scale(0.98);
+    background-color var(--motion-moderate) var(--motion-ease),
+    border-color var(--motion-moderate) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-moderate) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
 }
 button:disabled {
   cursor: default;
@@ -62,6 +72,36 @@ button:disabled {
 }
 button svg {
   flex-shrink: 0;
+}
+button[data-loading] {
+  position: relative;
+}
+button[data-loading='true'] {
+  cursor: wait;
+  opacity: 1;
+}
+.button-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: inherit;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+button[data-loading='true'] .button-content {
+  opacity: 0;
+}
+.button-spinner {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 20px;
+  height: 20px;
+  animation: button-spin 900ms linear infinite;
+}
+@keyframes button-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 h1,
 h2,
@@ -93,12 +133,16 @@ textarea {
   padding: 12px;
   max-width: 100%;
   min-width: 0;
+  transition:
+    border-color var(--motion-moderate) var(--motion-ease),
+    background-color var(--motion-moderate) var(--motion-ease),
+    box-shadow var(--motion-moderate) var(--motion-ease);
 }
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 2px solid #96bd87;
-  outline-offset: 1px;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 12%, transparent);
 }
 textarea {
   resize: vertical;
@@ -137,12 +181,6 @@ hr {
   min-height: 44px;
   white-space: nowrap;
 }
-.primary:hover:not(:disabled) {
-  background: linear-gradient(#51ac5c, #2c8744);
-  box-shadow:
-    inset 0 2px 0 #ffffff65,
-    0 4px 0 #1c5f2c;
-}
 .secondary {
   border: 1px solid #bbcfab;
   background: #f4f7e9;
@@ -151,9 +189,6 @@ hr {
   padding: 11px 17px;
   font-weight: 600;
   min-height: 44px;
-}
-.secondary:hover:not(:disabled) {
-  background: #e8f0d8;
 }
 .full {
   width: 100%;
@@ -176,9 +211,6 @@ hr {
 .icon-btn svg {
   width: 21px;
   height: 21px;
-}
-.icon-btn:hover {
-  background: #f1f1df;
 }
 .star {
   color: #bfa65f;
@@ -306,9 +338,6 @@ hr {
     inset 0 1px 0 #ffffff55,
     0 3px 0 #164f36;
 }
-.navigation button:not(.active):hover {
-  background: #f0efda;
-}
 .navigation button.active svg {
   color: #ffe5a0;
 }
@@ -409,9 +438,6 @@ hr {
   width: 70%;
   height: 40%;
   border-radius: 50%;
-}
-.dino-touch:hover {
-  background: #fff7cb15;
 }
 .speech {
   position: absolute;
@@ -533,6 +559,15 @@ hr {
   font-size: 11px;
   width: 128px;
 }
+.date-input .return-today {
+  min-height: 32px;
+  padding: 5px 7px;
+  border-radius: 8px;
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
 .date-strip {
   display: flex;
   justify-content: space-between;
@@ -545,6 +580,7 @@ hr {
   margin-bottom: 23px;
 }
 .date-strip > button {
+  position: relative;
   flex: 1;
   flex-direction: column;
   gap: 6px;
@@ -568,8 +604,18 @@ hr {
   font-weight: 700;
 }
 .date-strip .date-arrow {
-  flex: 0 0 16px;
+  flex: 0 0 44px;
   padding: 0;
+}
+.date-strip > button[aria-current='date']::after {
+  content: '';
+  position: absolute;
+  left: calc(50% - 2px);
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .task-grid {
   display: grid;
@@ -586,10 +632,9 @@ hr {
   flex-direction: column;
   justify-content: space-between;
   min-height: 187px;
-  transition: box-shadow 0.2s;
-}
-.task-card:hover {
-  box-shadow: 0 6px 20px #65551a12;
+  transition:
+    border-color var(--motion-moderate) var(--motion-ease),
+    box-shadow var(--motion-slow) var(--motion-ease);
 }
 .task-card.completed {
   background: #f4f7e9;
@@ -803,6 +848,14 @@ hr {
   border-radius: 22px;
   padding: 25px;
   box-shadow: var(--shadow);
+  transition:
+    border-color var(--motion-moderate) var(--motion-ease),
+    box-shadow var(--motion-slow) var(--motion-ease);
+}
+.task-card:focus-within,
+.card:has(button:not(:disabled), a[href], input, select, textarea):focus-within {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--border));
+  box-shadow: 0 5px 18px color-mix(in srgb, var(--green) 10%, transparent);
 }
 .card > h3 {
   display: flex;
@@ -1318,6 +1371,7 @@ hr {
   width: min(500px, calc(100% - 30px));
   max-height: 88dvh;
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--paper);
   color: #35452f;
 }
@@ -1336,11 +1390,14 @@ hr {
   font-size: 21px;
 }
 .modal-head .icon-btn {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
 }
 .modal-head .icon-btn svg {
   width: 18px;
+}
+.modal-body {
+  min-width: 0;
 }
 .field {
   display: flex;
@@ -1538,18 +1595,33 @@ hr {
   gap: 10px;
   background: #1e6348;
   color: #fffbe8;
-  padding: 15px 23px;
+  padding: 6px 8px 6px 20px;
   box-shadow: 0 8px 25px #25462b30;
   border: 1px solid #6f9c71;
   border-radius: 30px;
   font-size: 13px;
   max-width: calc(100% - 30px);
-  animation: toast-in 0.3s;
   white-space: normal;
 }
-.toast svg {
+.toast > svg {
   flex-shrink: 0;
   color: #ffd971;
+}
+.toast > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.toast-close {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: inherit;
+}
+.toast-close:focus-visible {
+  outline-color: #fffbe8;
+  outline-offset: -3px;
 }
 .login {
   min-height: 100dvh;
@@ -1708,16 +1780,6 @@ hr {
 @keyframes breathe {
   50% {
     transform: translateY(-8px);
-  }
-}
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    margin-bottom: -10px;
-  }
-  to {
-    opacity: 1;
-    margin-bottom: 0;
   }
 }
 @media (min-width: 1450px) {
@@ -2283,7 +2345,7 @@ hr {
     font-size: 11px;
   }
   .date-strip .date-arrow {
-    flex-basis: 12px;
+    flex-basis: 44px;
   }
   .task-grid {
     grid-template-columns: 1fr;
@@ -2551,7 +2613,7 @@ hr {
   }
   .toast {
     font-size: 12px;
-    padding: 13px 17px;
+    padding: 6px 7px 6px 15px;
     border-radius: 18px;
     bottom: 98px;
     width: max-content;
@@ -2801,6 +2863,42 @@ hr {
   color: white;
   border-color: var(--green);
 }
+.subject-tabs.fluid-selection {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--paper) 65%, var(--cream));
+}
+.subject-tabs.fluid-selection button {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 2px;
+  border-color: transparent;
+  background: transparent;
+  border-radius: 11px;
+  font-size: clamp(11px, 1.2vw, 14px);
+}
+.subject-tabs.fluid-selection button.active {
+  background: transparent;
+  border-color: transparent;
+}
+.selection-indicator {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--green);
+  box-shadow: 0 2px 5px color-mix(in srgb, var(--green) 18%, transparent);
+  pointer-events: none;
+}
+.selection-label {
+  position: relative;
+}
 .subject-art {
   object-fit: cover;
   background: none !important;
@@ -2957,6 +3055,9 @@ hr {
   color: #fff;
   box-shadow: none;
 }
+[data-skin='princess'] .app .subject-tabs.fluid-selection button.active {
+  background: transparent;
+}
 [data-skin='princess'] .hero-copy p {
   color: #944363;
 }
@@ -2964,6 +3065,49 @@ hr {
 [data-skin='princess'] .daily-summary {
   border-color: #edc3d1;
   box-shadow: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .primary:hover:not(:disabled) {
+    background: linear-gradient(#51ac5c, #2c8744);
+    box-shadow:
+      inset 0 2px 0 #ffffff65,
+      0 4px 0 #1c5f2c;
+  }
+  .secondary:hover:not(:disabled) {
+    background: #e8f0d8;
+  }
+  .icon-btn:hover:not(:disabled),
+  .navigation button:not(.active):hover,
+  .date-strip > button:not(.selected):hover,
+  .subject-tabs.fluid-selection button:not(.active):hover,
+  .date-input .return-today:hover,
+  .settings-row:hover {
+    background: color-mix(in srgb, var(--green) 8%, var(--paper));
+  }
+  .dino-touch:hover {
+    background: #fff7cb15;
+  }
+  input:hover:not(:disabled):not(:focus),
+  select:hover:not(:disabled):not(:focus),
+  textarea:hover:not(:disabled):not(:focus),
+  .skin-options button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+  }
+  .task-card:has(button:not(:disabled)):hover,
+  .card:has(button:not(:disabled), a[href], input, select, textarea):hover {
+    border-color: color-mix(in srgb, var(--green) 30%, var(--border));
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--green) 9%, transparent);
+  }
+  .toast-close:hover {
+    background: #ffffff1c;
+  }
+  [data-skin='princess'] .app .primary:hover:not(:disabled) {
+    background: linear-gradient(#e790ad, #c9648a);
+    box-shadow: 0 4px 0 #963c62;
+  }
+  [data-skin='princess'] .app .secondary:hover:not(:disabled) {
+    background: #fbe6ed;
+  }
 }
 .reward-management {
   display: flex;
