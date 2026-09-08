@@ -46,10 +46,12 @@ test('tablet child submits, parent approves, wallet and reward request complete'
   await page.getByRole('button', { name: /^待确认/ }).click();
   const review = page.locator('.review-card').filter({ hasText: title });
   await expect(review).toContainText('今天我读了一个故事');
-  await review.getByRole('button', { name: '通过，少发 1 星（+1）' }).click();
+  await review.getByLabel('每次发放星星').fill('3');
+  await review.getByLabel('本次完成次数').fill('2');
+  await review.getByRole('button', { name: '确认 2 次，发放 6 星' }).click();
   await expect(review).toHaveCount(0);
   await page.getByRole('button', { name: '星星口袋', exact: true }).click();
-  await expect(page.locator('.ledger-row').filter({ hasText: title })).toContainText('+1');
+  await expect(page.locator('.ledger-row').filter({ hasText: title })).toContainText('+6');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '退出 / 更换账号' }).click();
   await page.getByRole('button', { name: '小朋友', exact: true }).click();
@@ -317,4 +319,16 @@ test('family-load failure offers a working retry instead of reporting an unalloc
   await page.getByRole('button', { name: '重新加载', exact: true }).click();
   await expect(page.locator('.task-card').first()).toBeVisible();
   expect(attempts).toBe(2);
+});
+
+test('parent task order persists after reload within its subject', async ({ page }) => {
+  await login(page, 'parent');
+  await page.getByRole('button', { name: '任务规则', exact: true }).click();
+  const cards = page.locator('.rule-card').filter({ hasText: '体育 ·' });
+  const moving = await cards.nth(1).locator('h3').innerText();
+  await cards.nth(1).getByRole('button', { name: '上移', exact: true }).click();
+  await expect(cards.first().locator('h3')).toHaveText(moving);
+  await page.reload();
+  await page.getByRole('button', { name: '任务规则', exact: true }).click();
+  await expect(cards.first().locator('h3')).toHaveText(moving);
 });

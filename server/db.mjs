@@ -89,6 +89,20 @@ export function openDb(path) {
     db.exec(
       'ALTER TABLE submissions ADD COLUMN deduction INTEGER NOT NULL DEFAULT 0 CHECK(deduction IN (0,1))',
     );
+  for (const [name, definition] of [
+    ['quantity', 'INTEGER NOT NULL DEFAULT 1 CHECK(quantity BETWEEN 1 AND 20)'],
+    ['unit_stars', 'INTEGER CHECK(unit_stars BETWEEN 1 AND 101)'],
+  ])
+    if (
+      !db
+        .prepare('PRAGMA table_info(submissions)')
+        .all()
+        .some((c) => c.name === name)
+    )
+      db.exec(`ALTER TABLE submissions ADD COLUMN ${name} ${definition}`);
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS task_order(child_id TEXT NOT NULL REFERENCES users(id), rule_key TEXT NOT NULL, position INTEGER NOT NULL CHECK(position>=0), PRIMARY KEY(child_id,rule_key))',
+  );
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
   return db;
 }

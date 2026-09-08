@@ -858,3 +858,73 @@ test('parents may award one fewer star per completion with atomic accounting and
     200,
   );
 });
+
+test('custom award quantities respect remaining capacity, replay safely and restore with task order', async (t) => {
+  const s = await setup(t),
+    d = await s.dashboard();
+  const rule = d.rules.find((r) => r.subject === 'chinese');
+  const task = d.tasks.find((t) => t.rule_key === rule.rule_key);
+  assert.equal(
+    (await s.call(`/api/tasks/${task.id}`, 'PATCH', { ...task, daily_limit: 10 }, s.parent.token))
+      .status,
+    200,
+  );
+  const submit = (body, token = s.parent.token, key = uid()) =>
+    s.call(`/api/tasks/${task.id}/submit`, 'POST', body, token, key);
+  assert.equal((await submit({ unit_stars: 4, quantity: 3 }, s.child.token)).status, 400);
+  const pending = await submit({}, s.child.token);
+  const review = (body) =>
+    s.call(`/api/submissions/${pending.data.id}/review`, 'POST', body, s.parent.token);
+  assert.equal((await review({ approve: true, unit_stars: 3, quantity: 11 })).status, 409);
+  assert.equal((await review({ approve: true, unit_stars: 0, quantity: 2 })).status, 400);
+  assert.equal((await review({ approve: true, unit_stars: 3, quantity: 4 })).status, 200);
+  assert.equal((await s.dashboard()).tasks.find((t) => t.id === task.id).approved, 4);
+  assert.equal((await s.dashboard()).wallet.balance, d.wallet.balance + 12);
+  const key = uid();
+  for (let i = 0; i < 2; i++)
+    assert.equal((await submit({ unit_stars: 2, quantity: 3 }, s.parent.token, key)).status, 200);
+  assert.equal((await submit({ unit_stars: 2, quantity: 2 }, s.parent.token, key)).status, 409);
+  const concurrent = await Promise.all([
+    submit({ unit_stars: 1, quantity: 2 }),
+    submit({ unit_stars: 1, quantity: 2 }),
+  ]);
+  assert.deepEqual(concurrent.map((r) => r.status).sort(), [200, 409]);
+  assert.equal((await s.dashboard()).tasks.find((t) => t.id === task.id).approved, 9);
+  const baseline = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  const group = d.rules.filter((r) => r.subject === 'chinese'),
+    moving = group[1];
+  const reorder = (token) =>
+    s.call(
+      `/api/children/${s.child.user.id}/task-order`,
+      'POST',
+      { rule_key: moving.rule_key, direction: 'up' },
+      token,
+    );
+  assert.equal((await reorder(s.child.token)).status, 403);
+  assert.equal((await reorder(s.parent.token)).status, 200);
+  assert.equal(
+    (await s.dashboard()).tasks.filter((t) => t.subject === 'chinese')[0].rule_key,
+    moving.rule_key,
+  );
+  const backup = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  assert.deepEqual(backup.data.rules, baseline.data.rules);
+  assert.deepEqual(backup.data.tasks, baseline.data.tasks);
+  assert.equal(
+    (
+      await s.call(
+        '/api/admin/restore',
+        'POST',
+        { backup, password: 'local-admin-2026' },
+        s.admin.token,
+      )
+    ).status,
+    200,
+  );
+  const parent = await s.login('parent', 'parent123');
+  const restored = (
+    await s.call(`/api/children/${s.child.user.id}/dashboard`, 'GET', null, parent.token)
+  ).data;
+  assert.equal(restored.tasks.filter((t) => t.subject === 'chinese')[0].rule_key, moving.rule_key);
+  assert.equal(restored.tasks.find((t) => t.id === task.id).approved, 9);
+  assert.equal(restored.wallet.balance, d.wallet.balance + 20);
+});

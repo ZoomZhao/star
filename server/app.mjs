@@ -229,14 +229,14 @@ export function createApp(config = {}) {
     tx(db, () => materialize(db, c.id, date));
     const tasks = all(
       db,
-      `SELECT t.*, (SELECT COUNT(*) FROM submissions s WHERE s.task_id=t.id AND s.status='approved') approved, (SELECT COUNT(*) FROM submissions s WHERE s.task_id=t.id AND s.status='pending') pending FROM tasks t WHERE child_id=? AND date=? ORDER BY CASE subject WHEN 'chinese' THEN 0 WHEN 'math' THEN 1 WHEN 'english' THEN 2 WHEN 'sports' THEN 3 ELSE 4 END,created_at,title,id`,
+      `SELECT t.*, (SELECT COALESCE(SUM(quantity),0) FROM submissions s WHERE s.task_id=t.id AND s.status='approved') approved, (SELECT COALESCE(SUM(quantity),0) FROM submissions s WHERE s.task_id=t.id AND s.status='pending') pending FROM tasks t WHERE child_id=? AND date=? ORDER BY CASE subject WHEN 'chinese' THEN 0 WHEN 'math' THEN 1 WHEN 'english' THEN 2 WHEN 'sports' THEN 3 ELSE 4 END,COALESCE((SELECT position FROM task_order o WHERE o.child_id=t.child_id AND o.rule_key=t.rule_key),2147483647),(SELECT MIN(x.rowid) FROM rules x WHERE x.rule_key=t.rule_key),created_at,title,id`,
       c.id,
       date,
     );
     for (const t of tasks)
       t.submissions = all(
         db,
-        'SELECT id,status,note,review_note,created_at FROM submissions WHERE task_id=? ORDER BY created_at DESC',
+        'SELECT id,status,note,review_note,created_at,quantity,unit_stars FROM submissions WHERE task_id=? ORDER BY created_at DESC',
         t.id,
       );
     const totals = get(
@@ -266,7 +266,7 @@ export function createApp(config = {}) {
         ? []
         : all(
             db,
-            `SELECT s.*,t.title,t.icon,t.subject,t.stars,t.date,t.description FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE s.child_id=? AND s.status='pending' ORDER BY s.created_at`,
+            `SELECT s.*,t.title,t.icon,t.subject,t.stars,t.daily_limit,t.date,t.description, (t.daily_limit-(SELECT COALESCE(SUM(x.quantity),0) FROM submissions x WHERE x.task_id=t.id AND x.id!=s.id AND x.status IN ('pending','approved'))) remaining FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE s.child_id=? AND s.status='pending' ORDER BY s.created_at`,
             c.id,
           );
     const rules =
@@ -274,7 +274,7 @@ export function createApp(config = {}) {
         ? []
         : all(
             db,
-            'SELECT r.* FROM rules r WHERE child_id=? AND version=(SELECT MAX(version) FROM rules x WHERE x.rule_key=r.rule_key) ORDER BY created_at',
+            'SELECT r.* FROM rules r WHERE child_id=? AND version=(SELECT MAX(version) FROM rules x WHERE x.rule_key=r.rule_key) ORDER BY COALESCE((SELECT position FROM task_order o WHERE o.child_id=r.child_id AND o.rule_key=r.rule_key),2147483647),(SELECT MIN(x.rowid) FROM rules x WHERE x.rule_key=r.rule_key)',
             c.id,
           ).map((r) => ({ ...r, weekdays: JSON.parse(r.weekdays) }));
     res.json({
@@ -314,11 +314,20 @@ export function createApp(config = {}) {
         note: description,
         bonus: z.boolean().default(false),
         deduction: z.boolean().default(false),
+        quantity: z.number().int().min(1).max(20).default(1),
+        unit_stars: z.number().int().min(1).max(101).optional(),
       })
       .parse(req.body);
-    if ((v.bonus || v.deduction) && req.user.role === 'child') fail(400, '不能发放额外奖励');
+    if (
+      (v.bonus || v.deduction || v.unit_stars !== undefined || v.quantity !== 1) &&
+      req.user.role === 'child'
+    )
+      fail(400, '不能发放额外奖励');
     if (v.deduction && (v.bonus || task.stars <= 1))
       fail(400, '少发 1 星后至少保留 1 星，不能同时额外奖励');
+    if (v.unit_stars !== undefined && (v.bonus || v.deduction))
+      fail(400, '不能混合使用星星调整方式');
+    const unitStars = v.unit_stars ?? task.stars + Number(v.bonus) - Number(v.deduction);
     const requestKey = key(req);
     const result = tx(db, () => {
       const existing = get(db, 'SELECT * FROM submissions WHERE request_key=?', requestKey);
@@ -327,7 +336,11 @@ export function createApp(config = {}) {
           existing.task_id !== task.id ||
           existing.note !== v.note ||
           (req.user.role !== 'child' &&
-            (existing.bonus !== Number(v.bonus) || existing.deduction !== Number(v.deduction)))
+            (existing.bonus !== Number(v.bonus) ||
+              existing.deduction !== Number(v.deduction) ||
+              existing.quantity !== v.quantity ||
+              (existing.unit_stars ?? task.stars + existing.bonus - existing.deduction) !==
+                unitStars))
         )
           fail(409, '操作编号已用于其他内容，请刷新后重试');
         return existing;
@@ -336,10 +349,10 @@ export function createApp(config = {}) {
         fail(400, '只能完成当天任务');
       const used = get(
         db,
-        "SELECT COUNT(*) n FROM submissions WHERE task_id=? AND status IN ('pending','approved')",
+        "SELECT COALESCE(SUM(quantity),0) n FROM submissions WHERE task_id=? AND status IN ('pending','approved')",
         task.id,
       ).n;
-      if (used >= task.daily_limit) fail(409, '已达到今日上限（含待确认次数）');
+      if (used + v.quantity > task.daily_limit) fail(409, '已达到今日上限（含待确认次数）');
       const approved = req.user.role !== 'child';
       const row = {
         id: uid(),
@@ -348,6 +361,8 @@ export function createApp(config = {}) {
         status: approved ? 'approved' : 'pending',
         bonus: Number(v.bonus),
         deduction: Number(v.deduction),
+        quantity: v.quantity,
+        unit_stars: approved ? unitStars : null,
         note: v.note,
         review_note: '',
         reviewed_by: approved ? req.user.id : null,
@@ -359,14 +374,10 @@ export function createApp(config = {}) {
       if (approved)
         postLedger({
           childId: task.child_id,
-          amount: task.stars + Number(v.bonus) - Number(v.deduction),
+          amount: unitStars * v.quantity,
           kind: 'task',
           title: task.title,
-          note: v.bonus
-            ? '家长代完成，含额外奖励 1 星'
-            : v.deduction
-              ? '家长代完成，少发 1 星'
-              : '家长代完成',
+          note: `家长代完成：${unitStars} 星 × ${v.quantity} 次`,
           date: task.date,
           actor: req.user.id,
           submission: row.id,
@@ -380,7 +391,7 @@ export function createApp(config = {}) {
     role(req, 'parent', 'admin');
     const s = get(
       db,
-      'SELECT s.*,t.stars,t.title,t.date FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE s.id=?',
+      'SELECT s.*,t.stars,t.daily_limit,t.title,t.date FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE s.id=?',
       id.parse(req.params.submissionId),
     );
     if (!s) fail(404, '提交不存在');
@@ -391,39 +402,82 @@ export function createApp(config = {}) {
         note: description,
         bonus: z.boolean().default(false),
         deduction: z.boolean().default(false),
+        quantity: z.number().int().min(1).max(20).default(1),
+        unit_stars: z.number().int().min(1).max(101).optional(),
       })
       .parse(req.body);
-    if ((v.bonus || v.deduction) && !v.approve) fail(400, '退回时不能调整星星');
+    if ((v.bonus || v.deduction || v.unit_stars !== undefined || v.quantity !== 1) && !v.approve)
+      fail(400, '退回时不能调整星星');
     if (v.deduction && (v.bonus || s.stars <= 1))
       fail(400, '少发 1 星后至少保留 1 星，不能同时额外奖励');
+    if (v.unit_stars !== undefined && (v.bonus || v.deduction))
+      fail(400, '不能混合使用星星调整方式');
+    const unitStars = v.unit_stars ?? s.stars + Number(v.bonus) - Number(v.deduction);
     tx(db, () => {
       const current = get(db, 'SELECT status FROM submissions WHERE id=?', s.id);
       if (current.status !== 'pending') fail(409, '这条任务已经处理过了');
+      const used = get(
+        db,
+        "SELECT COALESCE(SUM(quantity),0) n FROM submissions WHERE task_id=? AND id!=? AND status IN ('pending','approved')",
+        s.task_id,
+        s.id,
+      ).n;
+      if (v.approve && used + v.quantity > s.daily_limit)
+        fail(409, '完成次数超过每日剩余上限（含待确认次数）');
       run(
         db,
-        'UPDATE submissions SET status=?,review_note=?,reviewed_by=?,reviewed_at=?,bonus=?,deduction=? WHERE id=?',
+        'UPDATE submissions SET status=?,review_note=?,reviewed_by=?,reviewed_at=?,bonus=?,deduction=?,quantity=?,unit_stars=? WHERE id=?',
         v.approve ? 'approved' : 'rejected',
         v.note,
         req.user.id,
         now(),
         Number(v.bonus),
         Number(v.deduction),
+        v.quantity,
+        v.approve ? unitStars : null,
         s.id,
       );
       if (v.approve)
         postLedger({
           childId: s.child_id,
-          amount: s.stars + Number(v.bonus) - Number(v.deduction),
+          amount: unitStars * v.quantity,
           kind: 'task',
           title: s.title,
-          note: [s.note, v.bonus ? '含额外奖励 1 星' : v.deduction ? '少发 1 星' : '']
-            .filter(Boolean)
-            .join('；'),
+          note: [s.note, `${unitStars} 星 × ${v.quantity} 次`].filter(Boolean).join('；'),
           date: s.date,
           actor: req.user.id,
           submission: s.id,
           requestKey: 'approval:' + s.id,
         });
+    });
+    res.json({ ok: true });
+  });
+  app.post('/api/children/:childId/task-order', (req, res) => {
+    role(req, 'parent', 'admin');
+    const c = child(req, req.params.childId);
+    const v = z.object({ rule_key: id, direction: z.enum(['up', 'down']) }).parse(req.body);
+    tx(db, () => {
+      const rules = all(
+        db,
+        `SELECT r.* FROM rules r WHERE child_id=? AND version=(SELECT MAX(version) FROM rules x WHERE x.rule_key=r.rule_key) ORDER BY COALESCE((SELECT position FROM task_order o WHERE o.child_id=r.child_id AND o.rule_key=r.rule_key),2147483647),(SELECT MIN(x.rowid) FROM rules x WHERE x.rule_key=r.rule_key)`,
+        c.id,
+      );
+      const selected = rules.find((r) => r.rule_key === v.rule_key);
+      if (!selected) fail(404, '规则不存在');
+      const group = rules.filter((r) => r.subject === selected.subject);
+      const index = group.findIndex((r) => r.rule_key === v.rule_key),
+        target = index + (v.direction === 'up' ? -1 : 1);
+      if (target < 0 || target >= group.length) return;
+      [group[index], group[target]] = [group[target], group[index]];
+      group.forEach((r, i) =>
+        run(
+          db,
+          'INSERT INTO task_order(child_id,rule_key,position) VALUES(?,?,?) ON CONFLICT(child_id,rule_key) DO UPDATE SET position=excluded.position',
+          c.id,
+          r.rule_key,
+          i,
+        ),
+      );
     });
     res.json({ ok: true });
   });

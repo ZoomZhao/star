@@ -985,7 +985,7 @@ public class MainActivity extends AppCompatActivity {
     ui.gap(copy, 10);
     ui.add(copy, ui.label(subjectName(t) + " · 每次 " + t.optInt("stars") + " 星"), -2);
     ui.gap(copy, 8);
-    ui.add(copy, ui.label("每天最多 " + t.optInt("daily_limit") + " 次 · 可额外奖励 1 星"), -2);
+    ui.add(copy, ui.label("每天最多 " + t.optInt("daily_limit") + " 次 · 家长可调整发放"), -2);
     top.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
     ui.grow(card, top);
     ui.gap(card, compact() ? 4 : 8);
@@ -1132,8 +1132,8 @@ public class MainActivity extends AppCompatActivity {
         t.optInt("pending") +
         " 次。"
     );
-    Spinner award = parent() ? awardSelector(f, t.optInt("stars")) : null;
-    ui.line(f, "家长可额外奖励 1 星，基础超过 1 星时也可少发 1 星");
+    EditText[] award = parent() ? awardFields(f, t.optInt("stars"), t.optInt("daily_limit") - t.optInt("approved") - t.optInt("pending")) : null;
+    ui.line(f, "家长可调整本次每次星星和完成次数");
     EditText note = ui.input(
       f,
       "想告诉家长的话（选填）",
@@ -1166,7 +1166,7 @@ public class MainActivity extends AppCompatActivity {
         mutation(
           "/api/tasks/" + t.optString("id") + "/submit",
           "POST",
-          json("note", note.getText().toString(), "bonus", award != null && award.getSelectedItemPosition() == 1, "deduction", award != null && award.getSelectedItemPosition() == 2),
+          awardBody(json("note", note.getText().toString()), award),
           true,
           parent() ? "已发放星星 ★" : "已提交！等家长确认后就能收到星星啦"
         )
@@ -1706,11 +1706,29 @@ public class MainActivity extends AppCompatActivity {
     });
   }
 
-  private Spinner awardSelector(LinearLayout f, int stars) {
-    String[] choices = stars > 1
-      ? new String[] { "按规则发放 " + stars + " 星", "额外奖励 1 星，共 " + (stars + 1) + " 星", "少发 1 星，共 " + (stars - 1) + " 星" }
-      : new String[] { "按规则发放 1 星", "额外奖励 1 星，共 2 星" };
-    return ui.select(f, "本次发放星星", choices, 0);
+  private EditText[] awardFields(LinearLayout f, int stars, int limit) {
+    EditText unit = ui.input(f, "每次发放星星（1–101）", String.valueOf(stars), 2);
+    EditText quantity = ui.input(f, "本次完成次数（最多 " + limit + " 次，含待确认上限）", "1", 2);
+    TextView total = ui.text("合计发放 " + stars + " 颗星星", 16, true);
+    ui.add(f, total, -2);
+    android.text.TextWatcher watcher = new android.text.TextWatcher() {
+      public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+      public void onTextChanged(CharSequence s, int start, int before, int count) {
+        int u = number(unit, 1, 101), q = number(quantity, 1, limit);
+        total.setText(u < 1 || q < 1 ? "请填写有效星星和次数" : "合计发放 " + u * q + " 颗星星");
+      }
+      public void afterTextChanged(android.text.Editable e) {}
+    };
+    unit.addTextChangedListener(watcher); quantity.addTextChangedListener(watcher);
+    return new EditText[] {unit, quantity};
+  }
+
+  private JSONObject awardBody(JSONObject body, EditText[] award) {
+    if (award != null) try {
+      body.put("unit_stars", number(award[0], 1, 101));
+      body.put("quantity", number(award[1], 1, 20));
+    } catch (Exception e) { throw new IllegalArgumentException(e); }
+    return body;
   }
 
   private void reviews(LinearLayout main) {
@@ -1745,7 +1763,7 @@ public class MainActivity extends AppCompatActivity {
                 "",
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
               );
-              Spinner award = task && approve ? awardSelector(f, r.optInt("stars")) : null;
+              EditText[] award = task && approve ? awardFields(f, r.optInt("stars"), r.optInt("remaining", 1)) : null;
               dialog(approve ? "确认通过" : "退回申请", f, approve ? "通过" : "退回", () ->
                 mutation(
                   "/api/" +
@@ -1754,7 +1772,7 @@ public class MainActivity extends AppCompatActivity {
                     r.optString("id") +
                     "/review",
                   "POST",
-                  json("approve", approve, "note", note.getText().toString(), "bonus", award != null && award.getSelectedItemPosition() == 1, "deduction", award != null && award.getSelectedItemPosition() == 2),
+                  awardBody(json("approve", approve, "note", note.getText().toString()), award),
                   false,
                   approve ? "已通过" : "已退回"
                 )
@@ -1779,7 +1797,7 @@ public class MainActivity extends AppCompatActivity {
     ui.add(main, ui.label("模板修改从明天生效；当天调整请编辑具体任务。"), -2);
     ui.gap(main, 10);
     LinearLayout list = ui.col();
-    list.addView(ui.button("从 10 个预制模板开始", false, this::templatePicker));
+    list.addView(ui.button("从预制模板开始", false, this::templatePicker));
     ui.gap(list, 14);
     for (int si = 0; si < 5; si++) {
       if (!subject.equals("all") && !subject.equals(SUBJECTS[si])) continue;
@@ -1811,6 +1829,10 @@ public class MainActivity extends AppCompatActivity {
         );
         ui.gap(c, 10);
         c.addView(ui.button("编辑子任务", false, () -> ruleForm(r, false)));
+        LinearLayout order = ui.row();
+        for (String direction : new String[] {"up", "down"}) order.addView(ui.button(direction.equals("up") ? "上移" : "下移", false, () -> mutation(childPath() + "/task-order", "POST", json("rule_key", r.optString("rule_key"), "direction", direction), false, "任务顺序已保存")), new LinearLayout.LayoutParams(0, ui.dp(48), 1));
+        ui.add(c, order, 48);
+
         ui.add(list, c, -2);
         ui.gap(list, 10);
       }
@@ -1831,7 +1853,7 @@ public class MainActivity extends AppCompatActivity {
         ui.gap(f, 10);
       }
     }
-    dialog("每个科目，两个小起点", f, null, null);
+    dialog("选择科目任务", f, null, null);
   }
 
   private void ruleForm(JSONObject initial, boolean task) {

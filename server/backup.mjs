@@ -12,6 +12,7 @@ const id = z.string().uuid(),
   bit = z.number().int().min(0).max(1),
   positive = z.number().int().positive();
 const rows = {
+  task_order: z.object({ child_id: id, rule_key: id, position: z.number().int().min(0) }).strict(),
   families: z.object({ id, name: text, created_at: timestamp }).strict(),
   users: z
     .object({
@@ -73,6 +74,8 @@ const rows = {
       task_id: id,
       bonus: bit.default(0),
       deduction: bit.default(0),
+      quantity: positive.max(20).default(1),
+      unit_stars: positive.max(101).nullable().default(null),
       child_id: id,
       status: z.enum(['pending', 'approved', 'rejected']),
       note: text,
@@ -134,7 +137,7 @@ const rows = {
     })
     .strict(),
 };
-const tables = Object.keys(rows);
+const tables = [...Object.keys(rows).filter((t) => t !== 'task_order'), 'task_order'];
 function invalid(message) {
   throw Object.assign(new Error(message), { status: 400 });
 }
@@ -144,7 +147,16 @@ const backupSchema = z
     version: z.literal(1),
     exported_at: timestamp,
     data: z
-      .object(Object.fromEntries(tables.map((t) => [t, z.array(rows[t]).max(100000)])))
+      .object(
+        Object.fromEntries(
+          tables.map((t) => [
+            t,
+            t === 'task_order'
+              ? z.array(rows[t]).max(100000).default([])
+              : z.array(rows[t]).max(100000),
+          ]),
+        ),
+      )
       .strict(),
   })
   .strict();
@@ -166,6 +178,13 @@ export function restore(db, input, backupDir) {
   const candidate = openDb(':memory:');
   try {
     tx(candidate, () => importRows(candidate, content.data));
+    if (
+      get(
+        candidate,
+        'SELECT o.rule_key FROM task_order o WHERE NOT EXISTS(SELECT 1 FROM rules r WHERE r.rule_key=o.rule_key AND r.child_id=o.child_id) LIMIT 1',
+      )
+    )
+      invalid('备份任务顺序不一致');
     if (!get(candidate, "SELECT id FROM users WHERE role='admin' AND active=1"))
       invalid('备份必须包含有效的超级管理员');
     if (all(candidate, 'SELECT child_id FROM ledger GROUP BY child_id HAVING SUM(amount)<0').length)
@@ -227,7 +246,7 @@ export function restore(db, input, backupDir) {
         LEFT JOIN redemptions r ON r.id=l.redemption_id
         LEFT JOIN ledger original ON original.id=l.reversal_of
         WHERE (l.kind='task' AND (s.id IS NULL OR s.status!='approved'
-          OR s.child_id!=l.child_id OR l.amount!=t.stars+s.bonus-s.deduction OR (s.bonus=1 AND s.deduction=1) OR l.amount<1))
+          OR s.child_id!=l.child_id OR l.amount!=COALESCE(s.unit_stars,t.stars+s.bonus-s.deduction)*s.quantity OR (s.bonus=1 AND s.deduction=1) OR l.amount<1))
         OR (l.kind='reward' AND (r.id IS NULL OR r.status!='approved'
           OR r.child_id!=l.child_id OR l.amount!=-r.cost))
         OR (l.kind='reversal' AND (original.id IS NULL OR original.kind='reversal'
@@ -249,7 +268,7 @@ export function restore(db, input, backupDir) {
           candidate,
           `SELECT x.id FROM ${table} x
           LEFT JOIN ledger l ON l.${link}=x.id
-          WHERE ${table === 'submissions' ? "(x.status!='approved' AND (x.bonus!=0 OR x.deduction!=0)) OR" : ''} (x.status='approved' AND l.id IS NULL)
+          WHERE ${table === 'submissions' ? "(x.status!='approved' AND (x.bonus!=0 OR x.deduction!=0 OR x.unit_stars IS NOT NULL OR x.quantity!=1)) OR" : ''} (x.status='approved' AND l.id IS NULL)
           OR (x.status='pending' AND (x.reviewed_by IS NOT NULL OR x.reviewed_at IS NOT NULL))
           OR (x.status!='pending' AND (x.reviewed_by IS NULL OR x.reviewed_at IS NULL)) LIMIT 1`,
         )
@@ -261,7 +280,7 @@ export function restore(db, input, backupDir) {
         candidate,
         `SELECT t.id FROM tasks t JOIN submissions s ON s.task_id=t.id
         WHERE s.status IN ('pending','approved') GROUP BY t.id
-        HAVING COUNT(*)>t.daily_limit LIMIT 1`,
+        HAVING SUM(s.quantity)>t.daily_limit LIMIT 1`,
       )
     )
       invalid('备份任务次数超出上限');

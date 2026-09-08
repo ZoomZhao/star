@@ -10,6 +10,10 @@ export type User = {
 export type Submission = {
   id: string;
   task_id: string;
+  quantity: number;
+  unit_stars: number | null;
+  remaining: number;
+  daily_limit: number;
   child_id: string;
   status: string;
   note: string;
