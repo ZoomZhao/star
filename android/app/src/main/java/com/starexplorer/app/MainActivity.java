@@ -780,23 +780,7 @@ public class MainActivity extends AppCompatActivity {
     ui.gap(hero, 8);
     ui.add(hero, ui.label("✦ " + skin.subtitle + " ✦"), -2);
     ui.gap(hero, 12);
-    ArtView art = new ArtView(this, skin.hero());
-    art.setContentDescription("和伙伴打招呼");
-    art.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-    art.setOnClickListener(v -> {
-      v.animate()
-        .scaleX(.97f)
-        .scaleY(.97f)
-        .setDuration(130)
-        .withEndAction(() -> v.animate().scaleX(1).scaleY(1).setDuration(180));
-      toast(
-        new String[] {
-          "每完成一件小事，就离梦想近一步！",
-          "你努力的样子，闪闪发光！",
-          "一起收集今天的小星星吧！",
-        }[new Random().nextInt(3)]
-      );
-    });
+    CompanionView art = new CompanionView(this, skin);
     ui.grow(hero, art);
     ui.gap(hero, 10);
     ui.add(hero, new JourneyView(this, skin), 148);

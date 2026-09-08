@@ -3873,3 +3873,93 @@ hr {
     width: 100%;
   }
 }
+
+/* Additional story worlds; web keeps the character still. */
+:root[data-skin='space'] {
+  --cream: #f4f2fc;
+  --paper: #fdfcff;
+  --green: #6252a0;
+  --deep: #3b365a;
+  --muted: #807993;
+  --border: #d7ceeb;
+  --skin-soft: #e6e0f8;
+  --skin-accent: #9a8acb;
+}
+:root[data-skin='ocean'] {
+  --cream: #edf8fa;
+  --paper: #fbfefe;
+  --green: #237789;
+  --deep: #28525d;
+  --muted: #71949b;
+  --border: #bce1e5;
+  --skin-soft: #d1eef0;
+  --skin-accent: #5ab7bc;
+}
+:root[data-skin='forest'] {
+  --cream: #fbf4ea;
+  --paper: #fffcf6;
+  --green: #936039;
+  --deep: #5d4736;
+  --muted: #988575;
+  --border: #e5d2b8;
+  --skin-soft: #f4e3c8;
+  --skin-accent: #d69752;
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest']) {
+  color: var(--deep);
+  background: var(--cream);
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest']) :is(.app, .workspace) {
+  background: var(--cream);
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest']) :is(.topbar, .navigation) {
+  background: var(--paper);
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest']) .app .primary {
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest'])
+  .app
+  :is(
+    .secondary,
+    .navigation button.active,
+    .balance-pill,
+    .daily-summary
+  ) {
+  background: var(--skin-soft);
+  color: var(--deep);
+  border-color: var(--border);
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest']) .subject-tabs button.active {
+  color: white;
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest']) .adventure {
+  background: radial-gradient(
+    circle at 50% 35%,
+    var(--paper) 15%,
+    var(--skin-soft) 65%,
+    var(--cream)
+  );
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest']) .island {
+  object-fit: contain;
+  padding: 12% 8% 22%;
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest']) .hero-copy h1 {
+  color: var(--green);
+  text-shadow: 0 2px var(--paper);
+}
+:is([data-skin='space'], [data-skin='ocean'], [data-skin='forest']) .adventure-progress {
+  background: var(--paper);
+}
+[data-skin='space'] .identity .avatar {
+  background: var(--skin-soft) url('/assets/space-hero.webp') center/contain no-repeat;
+}
+[data-skin='ocean'] .identity .avatar {
+  background: var(--skin-soft) url('/assets/ocean-hero.webp') center/contain no-repeat;
+}
+[data-skin='forest'] .identity .avatar {
+  background: var(--skin-soft) url('/assets/forest-hero.webp') center/contain no-repeat;
+}

@@ -7,7 +7,7 @@
 - 原生 Android 平板横屏：插画侧边导航、固定场景和日期、科目切换，两列任务在右侧区域独立滚动；窄屏使用底部导航。今日获得移到顶部，隐藏当日可得总数。
 - 任务与规则只按科目显示，默认语文，不提供「全部」混合列表。
 - 五个一级科目：语文、数学、英语、体育、其他；语文、数学、英语各三个预制模板，体育和其他各两个，新小朋友自动配置 13 个起步任务。
-- 恐龙探险与公主花园两套皮肤，选择保存在设备上。五张 ImageGen 科目插画在两端共用。
+- 恐龙探险、公主花园、太空小熊、海底小鲸、森林小狐五套皮肤，选择保存在设备上。Android 左侧主角支持点击摇摆、轻弹和扭动，连续点击切换动作并出现星星反馈；网页提供静态主题插画。系统关闭动画时使用静态反馈，离开页面停止动效。五张 ImageGen 科目插画在两端共用。
 - ImageGen 先生成手机与横屏平板设计，再用真实组件还原。任务插画、角色互动、音效开关、Android 触感与提交反馈。
 - 每日任务 / 日期切换 / 规则详情 / 重复完成次数与每日上限 / 家长审批及代完成。
 - 每日、每周、指定日期任务模板；模板版本与每日任务快照；当天无提交任务可单独修改。
@@ -55,7 +55,7 @@ npm run android:build
 npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-产物为 `artifacts/star-explorer-native.apk`（0.2.10-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
+产物为 `artifacts/star-explorer-native.apk`（0.2.11-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
 
 发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 

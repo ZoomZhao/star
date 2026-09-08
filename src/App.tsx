@@ -46,6 +46,49 @@ import {
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { api, initToken, saveToken, requestId, isNative, serverUrl, setServerUrl } from './api';
 import presets from '../shared/task-templates.json';
+const SKINS = [
+  {
+    key: 'dino',
+    label: '恐龙探险',
+    title: '星星探险家',
+    asset: 'island-portrait',
+    mobile: 'island',
+    alt: '恐龙探险家和装满星星的宝箱',
+  },
+  {
+    key: 'princess',
+    label: '公主花园',
+    title: '星星公主',
+    asset: 'princess-hero',
+    mobile: 'princess-hero',
+    alt: '星星公主和魔法花园',
+  },
+  {
+    key: 'space',
+    label: '太空小熊',
+    title: '星际小熊',
+    asset: 'space-hero',
+    mobile: 'space-hero',
+    alt: '挥手的太空小熊',
+  },
+  {
+    key: 'ocean',
+    label: '海底小鲸',
+    title: '小鲸奇遇记',
+    asset: 'ocean-hero',
+    mobile: 'ocean-hero',
+    alt: '快乐的海底小鲸',
+  },
+  {
+    key: 'forest',
+    label: '森林小狐',
+    title: '森林小队长',
+    asset: 'forest-hero',
+    mobile: 'forest-hero',
+    alt: '戴围巾的森林小狐',
+  },
+];
+
 const subjects: Record<string, string> = {
   chinese: '语文',
   math: '数学',
@@ -308,6 +351,7 @@ export default function App() {
     [taskPage, setTaskPage] = useState(0),
     [skin, setSkin] = useState(localStorage.getItem('star-skin') || 'dino'),
     [skinOpen, setSkinOpen] = useState(false);
+  const skinTheme = SKINS.find((option) => option.key === skin) || SKINS[0];
   useEffect(() => {
     document.documentElement.dataset.skin = skin;
     localStorage.setItem('star-skin', skin);
@@ -689,32 +733,21 @@ export default function App() {
               <div className="daily-layout">
                 <aside className="adventure">
                   <picture>
-                    <source
-                      media="(min-width:901px)"
-                      srcSet={
-                        skin === 'princess'
-                          ? '/assets/princess-hero.webp'
-                          : '/assets/island-portrait.webp'
-                      }
-                    />
+                    <source media="(min-width:901px)" srcSet={`/assets/${skinTheme.asset}.webp`} />
                     <img
                       className="island"
-                      src={
-                        skin === 'princess' ? '/assets/princess-hero.webp' : '/assets/island.webp'
-                      }
-                      alt={
-                        skin === 'princess' ? '星星公主和魔法花园' : '恐龙探险家和装满星星的宝箱'
-                      }
+                      src={`/assets/${skinTheme.mobile}.webp`}
+                      alt={skinTheme.alt}
                     />
                   </picture>
                   <div className="hero-copy">
                     <span className="eyebrow">LITTLE STEPS, BIG ADVENTURES</span>
-                    <h1>{skin === 'princess' ? '星星公主' : '星星探险家'}</h1>
+                    <h1>{skinTheme.title}</h1>
                     <p>✦ 今天也要闪闪发光 ✦</p>
                   </div>
                   <Button
                     className="dino-touch"
-                    aria-label="和小恐龙打招呼"
+                    aria-label={skin === 'dino' ? '和小恐龙打招呼' : `和${skinTheme.title}打招呼`}
                     onClick={() => {
                       feedback();
                       setCheer(
@@ -1341,10 +1374,7 @@ export default function App() {
             close={() => setSkinOpen(false)}
           >
             <div className="skin-options">
-              {[
-                ['dino', '恐龙探险', 'island-portrait'],
-                ['princess', '公主花园', 'princess-hero'],
-              ].map(([key, name, asset]) => (
+              {SKINS.map(({ key, label: name, asset }) => (
                 <Button
                   key={key}
                   className={key === skin ? 'chosen' : ''}

@@ -374,3 +374,33 @@ test('foreground polling refreshes after one minute, pauses hidden, and refreshe
   await resumed;
   expect(reads).toBe(initial + 2);
 });
+
+test('all five skins have usable artwork and preserve the chosen theme on reload', async ({
+  page,
+}) => {
+  await login(page);
+  for (const [key, label, title] of [
+    ['space', '太空小熊', '星际小熊'],
+    ['ocean', '海底小鲸', '小鲸奇遇记'],
+    ['forest', '森林小狐', '森林小队长'],
+    ['princess', '公主花园', '星星公主'],
+    ['dino', '恐龙探险', '星星探险家'],
+  ]) {
+    await page.getByRole('button', { name: '换装', exact: true }).click();
+    await expect(page.locator('.skin-options button')).toHaveCount(5);
+    await page.locator('.skin-options button').filter({ hasText: label }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-skin', key);
+    await expect(page.locator('.hero-copy h1')).toHaveText(title);
+    await expect
+      .poll(() =>
+        page
+          .locator('img.island')
+          .evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0),
+      )
+      .toBe(true);
+    await expect(page.locator('.modal')).toHaveCount(0);
+    await page.screenshot({ path: `artifacts/skin-web-${key}.png` });
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-skin', key);
+  }
+});

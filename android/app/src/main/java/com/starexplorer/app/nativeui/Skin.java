@@ -31,7 +31,10 @@ public enum Skin {
     "#723C55",
     "#A38389",
     "#F0CBD3"
-  );
+  ),
+  SPACE("space", "太空小熊", "星际小熊", "小小勇气，探索大宇宙", "#F4F2FC", "#FDFCFF", "#6252A0", "#9A8ACB", "#E6E0F8", "#3B365A", "#807993", "#D7CEEB"),
+  OCEAN("ocean", "海底小鲸", "小鲸奇遇记", "每一份努力，都荡起小浪花", "#EDF8FA", "#FBFEFE", "#237789", "#5AB7BC", "#D1EEF0", "#28525D", "#71949B", "#BCE1E5"),
+  FOREST("forest", "森林小狐", "森林小队长", "带着好奇，发现成长的宝藏", "#FBF4EA", "#FFFCF6", "#936039", "#D69752", "#F4E3C8", "#5D4736", "#988575", "#E5D2B8");
 
   public final String key, label, title, subtitle;
   public final int background, surface, primary, accent, soft, ink, muted, border;
@@ -65,7 +68,8 @@ public enum Skin {
   }
 
   public static Skin from(String key) {
-    return "princess".equals(key) ? PRINCESS : DINO;
+    for (Skin skin : values()) if (skin.key.equals(key)) return skin;
+    return DINO;
   }
 
   public String hero() {
@@ -73,6 +77,6 @@ public enum Skin {
   }
 
   public String atlas() {
-    return "skins/" + key + "-tasks.webp";
+    return "skins/" + (this == PRINCESS ? "princess" : "dino") + "-tasks.webp";
   }
 }
