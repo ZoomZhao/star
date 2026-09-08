@@ -1,0 +1,82 @@
+[
+  {
+    "subject": "chinese",
+    "title": "朗读语文课文",
+    "description": "认真朗读一篇课文，声音清楚，读完和家长分享一句喜欢的话。",
+    "icon": "book",
+    "stars": 1,
+    "daily_limit": 2
+  },
+  {
+    "subject": "chinese",
+    "title": "练习汉字书写",
+    "description": "专心练习 10 分钟汉字，注意笔顺和坐姿。",
+    "icon": "pencil",
+    "stars": 1,
+    "daily_limit": 1
+  },
+  {
+    "subject": "math",
+    "title": "口算小练习",
+    "description": "完成 10 道适合自己的口算题，和家长一起检查。",
+    "icon": "pencil",
+    "stars": 1,
+    "daily_limit": 2
+  },
+  {
+    "subject": "math",
+    "title": "数学趣味挑战",
+    "description": "完成一道数学思考题或一个图形游戏，说一说自己的思路。",
+    "icon": "blocks",
+    "stars": 2,
+    "daily_limit": 1
+  },
+  {
+    "subject": "english",
+    "title": "读英文绘本",
+    "description": "和家长一起读一本英文绘本，大声读出喜欢的句子。",
+    "icon": "book",
+    "stars": 1,
+    "daily_limit": 2
+  },
+  {
+    "subject": "english",
+    "title": "英语听说练习",
+    "description": "听英语故事或儿歌 10 分钟，跟读 3 个喜欢的词句。",
+    "icon": "heart",
+    "stars": 1,
+    "daily_limit": 1
+  },
+  {
+    "subject": "sports",
+    "title": "户外动一动",
+    "description": "到户外开心运动至少 20 分钟，选择适合自己的活动。",
+    "icon": "leaf",
+    "stars": 2,
+    "daily_limit": 1
+  },
+  {
+    "subject": "sports",
+    "title": "跳绳小挑战",
+    "description": "在家长陪伴下练习跳绳 5 分钟，可以分组休息。",
+    "icon": "leaf",
+    "stars": 1,
+    "daily_limit": 2
+  },
+  {
+    "subject": "other",
+    "title": "自己刷牙",
+    "description": "早晚认真刷牙，每次坚持 2 分钟。",
+    "icon": "brush",
+    "stars": 1,
+    "daily_limit": 2
+  },
+  {
+    "subject": "other",
+    "title": "收好小玩具",
+    "description": "让每一个玩具都回到自己的家。",
+    "icon": "blocks",
+    "stars": 2,
+    "daily_limit": 1
+  }
+]

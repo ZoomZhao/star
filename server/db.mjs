@@ -1,3 +1,4 @@
+import templates from '../shared/task-templates.json' with { type: 'json' };
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -39,8 +40,8 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS families(id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, family_id TEXT REFERENCES families(id), username TEXT UNIQUE NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','parent','child')), password_hash TEXT NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)), created_at TEXT NOT NULL, CHECK((role='admin' AND family_id IS NULL) OR (role!='admin' AND family_id IS NOT NULL)));
 CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS rules(id TEXT PRIMARY KEY, rule_key TEXT NOT NULL, child_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, description TEXT NOT NULL, icon TEXT NOT NULL, stars INTEGER NOT NULL CHECK(stars BETWEEN 1 AND 100), daily_limit INTEGER NOT NULL CHECK(daily_limit BETWEEN 1 AND 20), schedule TEXT NOT NULL CHECK(schedule IN ('daily','weekly','once')), weekdays TEXT NOT NULL, on_date TEXT, effective_from TEXT NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), version INTEGER NOT NULL CHECK(version>0), created_at TEXT NOT NULL, UNIQUE(rule_key,version));
-CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, child_id TEXT NOT NULL REFERENCES users(id), date TEXT NOT NULL, rule_key TEXT NOT NULL, rule_version INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, icon TEXT NOT NULL, stars INTEGER NOT NULL CHECK(stars BETWEEN 1 AND 100), daily_limit INTEGER NOT NULL CHECK(daily_limit BETWEEN 1 AND 20), created_at TEXT NOT NULL, UNIQUE(child_id,date,rule_key));
+CREATE TABLE IF NOT EXISTS rules(id TEXT PRIMARY KEY, rule_key TEXT NOT NULL, child_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, description TEXT NOT NULL, icon TEXT NOT NULL, subject TEXT NOT NULL DEFAULT 'other' CHECK(subject IN ('chinese','math','english','sports','other')), stars INTEGER NOT NULL CHECK(stars BETWEEN 1 AND 100), daily_limit INTEGER NOT NULL CHECK(daily_limit BETWEEN 1 AND 20), schedule TEXT NOT NULL CHECK(schedule IN ('daily','weekly','once')), weekdays TEXT NOT NULL, on_date TEXT, effective_from TEXT NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), version INTEGER NOT NULL CHECK(version>0), created_at TEXT NOT NULL, UNIQUE(rule_key,version));
+CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, child_id TEXT NOT NULL REFERENCES users(id), date TEXT NOT NULL, rule_key TEXT NOT NULL, rule_version INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, icon TEXT NOT NULL, subject TEXT NOT NULL DEFAULT 'other' CHECK(subject IN ('chinese','math','english','sports','other')), stars INTEGER NOT NULL CHECK(stars BETWEEN 1 AND 100), daily_limit INTEGER NOT NULL CHECK(daily_limit BETWEEN 1 AND 20), created_at TEXT NOT NULL, UNIQUE(child_id,date,rule_key));
 CREATE TABLE IF NOT EXISTS submissions(id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), child_id TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected')), note TEXT NOT NULL, review_note TEXT NOT NULL, reviewed_by TEXT REFERENCES users(id), created_at TEXT NOT NULL, reviewed_at TEXT, request_key TEXT UNIQUE NOT NULL);
 CREATE TABLE IF NOT EXISTS rewards(id TEXT PRIMARY KEY, family_id TEXT NOT NULL REFERENCES families(id), title TEXT NOT NULL, description TEXT NOT NULL, icon TEXT NOT NULL, cost INTEGER NOT NULL CHECK(cost BETWEEN 1 AND 100000), active INTEGER NOT NULL CHECK(active IN (0,1)), created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS redemptions(id TEXT PRIMARY KEY, reward_id TEXT NOT NULL REFERENCES rewards(id), child_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, icon TEXT NOT NULL, cost INTEGER NOT NULL CHECK(cost>0), status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected')), review_note TEXT NOT NULL, reviewed_by TEXT REFERENCES users(id), created_at TEXT NOT NULL, reviewed_at TEXT, request_key TEXT UNIQUE NOT NULL);
@@ -54,6 +55,21 @@ export function openDb(path) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path, { timeout: 5000 });
   db.exec(schema);
+  for (const table of ['rules', 'tasks']) {
+    if (
+      !db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .some((c) => c.name === 'subject')
+    ) {
+      db.exec(
+        `ALTER TABLE ${table} ADD COLUMN subject TEXT NOT NULL DEFAULT 'other' CHECK(subject IN ('chinese','math','english','sports','other'))`,
+      );
+      db.exec(
+        `UPDATE ${table} SET subject=CASE WHEN title LIKE '%英文%' OR title LIKE '%英语%' THEN 'english' WHEN icon='leaf' THEN 'sports' ELSE 'other' END`,
+      );
+    }
+  }
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
   return db;
 }
@@ -94,7 +110,27 @@ export function createUser(db, { family_id = null, username, name, role, passwor
     created_at: now(),
   };
   insert(db, 'users', user);
+  if (role === 'child') seedTemplates(db, user.id);
   return publicUser(user);
+}
+export function seedTemplates(db, childId) {
+  for (const preset of templates) {
+    if (get(db, 'SELECT id FROM rules WHERE child_id=? AND title=?', childId, preset.title))
+      continue;
+    insert(db, 'rules', {
+      ...preset,
+      id: uid(),
+      rule_key: uid(),
+      child_id: childId,
+      schedule: 'daily',
+      weekdays: '[]',
+      on_date: null,
+      effective_from: today(),
+      enabled: 1,
+      version: 1,
+      created_at: now(),
+    });
+  }
 }
 export function materialize(db, childId, date) {
   const rules = all(
@@ -130,6 +166,7 @@ export function materialize(db, childId, date) {
         title: r.title,
         description: r.description,
         icon: r.icon,
+        subject: r.subject,
         stars: r.stars,
         daily_limit: r.daily_limit,
         created_at: now(),
@@ -165,30 +202,7 @@ export function bootstrap(db, config) {
       role: 'child',
       password: 'child123',
     });
-    [
-      ['读英文绘本', '和爸爸妈妈一起读一本英文绘本，大声读出喜欢的句子。', 'book', 1, 2],
-      ['自己刷牙', '早晚认真刷牙，每次坚持 2 分钟。', 'brush', 1, 2],
-      ['收好小玩具', '让每一个玩具都回到自己的家。', 'blocks', 2, 1],
-      ['户外动一动', '走进大自然，开心运动至少 20 分钟。', 'leaf', 2, 1],
-    ].forEach(([title, description, icon, stars, daily_limit]) =>
-      insert(db, 'rules', {
-        id: uid(),
-        rule_key: uid(),
-        child_id: child.id,
-        title,
-        description,
-        icon,
-        stars,
-        daily_limit,
-        schedule: 'daily',
-        weekdays: '[]',
-        on_date: null,
-        effective_from: addDays(today(), -7),
-        enabled: 1,
-        version: 1,
-        created_at: now(),
-      }),
-    );
+    run(db, 'UPDATE rules SET effective_from=? WHERE child_id=?', addDays(today(), -7), child.id);
     [
       ['甜甜冰淇淋', '和家长一起挑选喜欢的口味。', 'icecream', 5],
       ['新玩具伙伴', '一起挑选一个心仪的小玩具。', 'toy', 30],

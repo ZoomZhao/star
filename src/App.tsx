@@ -40,6 +40,14 @@ import {
 } from 'lucide-react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { api, initToken, saveToken, requestId, isNative, serverUrl, setServerUrl } from './api';
+import presets from '../shared/task-templates.json';
+const subjects: Record<string, string> = {
+  chinese: '语文',
+  math: '数学',
+  english: '英语',
+  sports: '体育',
+  other: '其他',
+};
 import type { Dashboard, User, Task, Rule, Reward, Entry } from './types';
 const icons: Record<string, typeof Star> = {
   book: BookOpen,
@@ -90,7 +98,15 @@ function timeText(d: string) {
 function StarIcon({ size = 22, filled = true }: { size?: number; filled?: boolean }) {
   return <Star size={size} className={filled ? 'star filled' : 'star'} strokeWidth={1.7} />;
 }
-function Tile({ icon, size = '' }: { icon: string; size?: string }) {
+function Tile({ icon, size = '', subject }: { icon: string; size?: string; subject?: string }) {
+  if (subject)
+    return (
+      <img
+        className={`tile subject-art ${size}`}
+        src={`/assets/subjects/${subject}.webp`}
+        alt={subjects[subject] || '其他'}
+      />
+    );
   const Icon = icons[icon] || Star;
   return (
     <div className={`tile tile-${icon} ${size}`}>
@@ -307,13 +323,38 @@ export default function App() {
     [date, setDate] = useState(currentDate()),
     [data, setData] = useState<Dashboard | null>(null),
     [page, setPage] = useState('today'),
+    [rewardFilter, setRewardFilter] = useState('all'),
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [busy, setBusy] = useState(false),
     [dialog, setDialog] = useState<Dialog | null>(null),
     [sound, setSound] = useState(localStorage.getItem('star-sound') === 'true'),
     [online, setOnline] = useState(navigator.onLine),
-    [cheer, setCheer] = useState('');
+    [cheer, setCheer] = useState(''),
+    [subject, setSubject] = useState('all'),
+    [taskPage, setTaskPage] = useState(0),
+    [skin, setSkin] = useState(localStorage.getItem('star-skin') || 'dino'),
+    [skinOpen, setSkinOpen] = useState(false);
+  useEffect(() => {
+    document.documentElement.dataset.skin = skin;
+    localStorage.setItem('star-skin', skin);
+  }, [skin]);
+  useEffect(() => setTaskPage(0), [date, subject, childId]);
+  const filteredTasks = data?.tasks.filter((t) => subject === 'all' || t.subject === subject) || [];
+  const visiblePage = Math.min(taskPage, Math.max(0, Math.ceil(filteredTasks.length / 4) - 1));
+  const subjectPicker = (
+    <div className="subject-tabs" aria-label="科目分类">
+      {Object.entries({ all: '全部', ...subjects }).map(([key, label]) => (
+        <button
+          key={key}
+          className={key === subject ? 'active' : ''}
+          onClick={() => setSubject(key)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
   const working = useRef(false),
     lastBalance = useRef<number | null>(null),
     fetchVersion = useRef(0);
@@ -518,6 +559,9 @@ export default function App() {
           {dateText(date)}
         </div>
         <div className="top-actions">
+          <button className="secondary" onClick={() => setSkinOpen(true)}>
+            换装
+          </button>
           <button
             className="icon-btn sound-toggle"
             aria-label={sound ? '关闭音效' : '打开音效'}
@@ -618,16 +662,27 @@ export default function App() {
               <div className="daily-layout">
                 <aside className="adventure">
                   <picture>
-                    <source media="(min-width:901px)" srcSet="/assets/island-portrait.webp" />
+                    <source
+                      media="(min-width:901px)"
+                      srcSet={
+                        skin === 'princess'
+                          ? '/assets/princess-hero.webp'
+                          : '/assets/island-portrait.webp'
+                      }
+                    />
                     <img
                       className="island"
-                      src="/assets/island.webp"
-                      alt="恐龙探险家和装满星星的宝箱"
+                      src={
+                        skin === 'princess' ? '/assets/princess-hero.webp' : '/assets/island.webp'
+                      }
+                      alt={
+                        skin === 'princess' ? '星星公主和魔法花园' : '恐龙探险家和装满星星的宝箱'
+                      }
                     />
                   </picture>
                   <div className="hero-copy">
                     <span className="eyebrow">LITTLE STEPS, BIG ADVENTURES</span>
-                    <h1>星星探险家</h1>
+                    <h1>{skin === 'princess' ? '星星公主' : '星星探险家'}</h1>
                     <p>✦ 今天也要闪闪发光 ✦</p>
                   </div>
                   <button
@@ -695,14 +750,15 @@ export default function App() {
                     </label>
                   </div>
                   <DateStrip date={date} today={data.today} setDate={setDate} />
+                  <div className="subject-control">{subjectPicker}</div>
                   <div className="task-grid">
-                    {data.tasks.map((t) => (
+                    {filteredTasks.slice(visiblePage * 4, visiblePage * 4 + 4).map((t) => (
                       <article
                         key={t.id}
                         className={`task-card ${t.approved >= t.daily_limit ? 'completed' : ''}`}
                       >
                         <div className="task-main">
-                          <Tile icon={t.icon} />
+                          <Tile icon={t.icon} subject={t.subject} />
                           <div className="task-copy">
                             <button
                               className="task-title"
@@ -781,13 +837,32 @@ export default function App() {
                       </article>
                     ))}
                   </div>
-                  {!data.tasks.length && (
+                  {!filteredTasks.length && (
                     <Empty>
                       {date > data.today
                         ? '这一天还没有安排任务。'
                         : '还没有任务，请家长来安排今天的小冒险吧。'}
                     </Empty>
                   )}
+                  <div className="task-pagination">
+                    <button
+                      className="secondary"
+                      disabled={visiblePage === 0}
+                      onClick={() => setTaskPage(visiblePage - 1)}
+                    >
+                      上一页
+                    </button>
+                    <span>
+                      {visiblePage + 1} / {Math.max(1, Math.ceil(filteredTasks.length / 4))}
+                    </span>
+                    <button
+                      className="secondary"
+                      disabled={(visiblePage + 1) * 4 >= filteredTasks.length}
+                      onClick={() => setTaskPage(visiblePage + 1)}
+                    >
+                      下一页
+                    </button>
+                  </div>
                   <div className="daily-summary">
                     <div>
                       <StarIcon size={31} />
@@ -880,7 +955,7 @@ export default function App() {
               <section className="shop-page">
                 <PageHeading
                   eyebrow="A LITTLE WISH, A HAPPY REWARD"
-                  title="奖励小铺"
+                  title={isParent ? '奖励小铺管理' : '奖励小铺'}
                   icon={<Store />}
                   action={
                     isParent ? (
@@ -890,6 +965,26 @@ export default function App() {
                     ) : undefined
                   }
                 />
+                {isParent && (
+                  <div className="reward-management">
+                    <label>
+                      奖励状态{' '}
+                      <select
+                        aria-label="奖励状态"
+                        value={rewardFilter}
+                        onChange={(e) => setRewardFilter(e.target.value)}
+                      >
+                        <option value="all">全部奖励</option>
+                        <option value="active">已上架</option>
+                        <option value="inactive">已下架</option>
+                      </select>
+                    </label>
+                    <p>奖励由本家庭共用，下架后可重新上架。</p>
+                    <button className="secondary" onClick={() => setPage('review')}>
+                      审核兑换申请
+                    </button>
+                  </div>
+                )}
                 <div className="shop-banner">
                   <div>
                     <span className="eyebrow">把努力，变成喜欢的事物</span>
@@ -907,50 +1002,94 @@ export default function App() {
                   </div>
                 </div>
                 <div className="rewards-grid">
-                  {data.rewards.map((r) => {
-                    const waiting = data.redemptions.some(
-                      (x) => x.reward_id === r.id && x.status === 'pending',
-                    );
-                    return (
-                      <article className="reward-card" key={r.id}>
-                        <Tile icon={r.icon} size="large" />
-                        <h3>{r.title}</h3>
-                        <p>{r.description}</p>
-                        <div className="reward-bottom">
-                          <strong>
-                            <StarIcon size={20} />
-                            {r.cost}
-                          </strong>
-                          <button
-                            className="secondary"
-                            disabled={
-                              busy ||
-                              waiting ||
-                              !online ||
-                              (!isParent && r.cost > data.wallet.balance)
-                            }
-                            onClick={() =>
-                              setDialog(
-                                isParent
-                                  ? { type: 'reward', reward: r }
-                                  : { type: 'redeem', reward: r },
-                              )
-                            }
-                          >
-                            {isParent
-                              ? '编辑奖励'
-                              : waiting
-                                ? '等待确认'
-                                : r.cost > data.wallet.balance
-                                  ? `还差 ${r.cost - data.wallet.balance} 星`
-                                  : '我想兑换'}
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
+                  {data.rewards
+                    .filter(
+                      (r) =>
+                        !isParent ||
+                        rewardFilter === 'all' ||
+                        (rewardFilter === 'active' ? !!r.active : !r.active),
+                    )
+                    .map((r) => {
+                      const waiting = data.redemptions.some(
+                        (x) => x.reward_id === r.id && x.status === 'pending',
+                      );
+                      return (
+                        <article className="reward-card" key={r.id}>
+                          <Tile icon={r.icon} size="large" />
+                          <h3>{r.title}</h3>
+                          {isParent && (
+                            <span className={`tag ${r.active ? 'approved' : 'rejected'}`}>
+                              {r.active ? '已上架' : '已下架'}
+                            </span>
+                          )}
+                          <p>{r.description}</p>
+                          <div className="reward-bottom">
+                            <strong>
+                              <StarIcon size={20} />
+                              {r.cost}
+                            </strong>
+                            <button
+                              className="secondary"
+                              disabled={
+                                busy ||
+                                (!isParent && waiting) ||
+                                !online ||
+                                (!isParent && r.cost > data.wallet.balance)
+                              }
+                              onClick={() =>
+                                setDialog(
+                                  isParent
+                                    ? { type: 'reward', reward: r }
+                                    : { type: 'redeem', reward: r },
+                                )
+                              }
+                            >
+                              {isParent
+                                ? '编辑奖励'
+                                : waiting
+                                  ? '等待确认'
+                                  : r.cost > data.wallet.balance
+                                    ? `还差 ${r.cost - data.wallet.balance} 星`
+                                    : '我想兑换'}
+                            </button>
+                          </div>
+                          {isParent && (
+                            <button
+                              className="secondary reward-status-action"
+                              disabled={busy || !online}
+                              onClick={() =>
+                                act(
+                                  () =>
+                                    api(`/api/rewards/${r.id}`, 'PATCH', {
+                                      title: r.title,
+                                      description: r.description,
+                                      icon: r.icon,
+                                      cost: r.cost,
+                                      active: !r.active,
+                                    }),
+                                  r.active ? '奖励已下架' : '奖励已上架',
+                                )
+                              }
+                            >
+                              {r.active ? '下架奖励' : '重新上架'}
+                            </button>
+                          )}
+                        </article>
+                      );
+                    })}
                 </div>
-                {!data.rewards.length && <Empty>小铺还在准备中，家长可以添加第一个奖励。</Empty>}
+                {!data.rewards.filter(
+                  (r) =>
+                    !isParent ||
+                    rewardFilter === 'all' ||
+                    (rewardFilter === 'active' ? !!r.active : !r.active),
+                ).length && (
+                  <Empty>
+                    {isParent
+                      ? '当前筛选下没有奖励，可以添加奖励或切换状态查看。'
+                      : '小铺还在准备中，家长可以添加第一个奖励。'}
+                  </Empty>
+                )}
                 <div className="card redemption-list">
                   <h3>我的兑换记录</h3>
                   {data.redemptions.length ? (
@@ -1090,44 +1229,49 @@ export default function App() {
                     模板修改从明天起生效，已有的每日任务快照保留。当天调整请在任务详情中编辑。
                   </span>
                 </div>
+                {subjectPicker}
                 <div className="rules-grid">
-                  {data.rules.map((r) => (
-                    <article className="card rule-card" key={r.id}>
-                      <div className="list-row">
-                        <Tile icon={r.icon} />
-                        <div>
-                          <h3>{r.title}</h3>
-                          <p>
-                            每次 {r.stars} 星 · 每日上限 {r.daily_limit} 次
-                          </p>
+                  {data.rules
+                    .filter((r) => subject === 'all' || r.subject === subject)
+                    .map((r) => (
+                      <article className="card rule-card" key={r.id}>
+                        <div className="list-row">
+                          <Tile icon={r.icon} subject={r.subject} />
+                          <div>
+                            <h3>
+                              {subjects[r.subject]} · {r.title}
+                            </h3>
+                            <p>
+                              每次 {r.stars} 星 · 每日上限 {r.daily_limit} 次
+                            </p>
+                          </div>
+                          <button
+                            className="icon-btn"
+                            aria-label={`编辑${r.title}`}
+                            onClick={() => setDialog({ type: 'rule', rule: r })}
+                          >
+                            <Pencil size={18} />
+                          </button>
                         </div>
-                        <button
-                          className="icon-btn"
-                          aria-label={`编辑${r.title}`}
-                          onClick={() => setDialog({ type: 'rule', rule: r })}
-                        >
-                          <Pencil size={18} />
-                        </button>
-                      </div>
-                      <p className="rule-description">{r.description || '暂无补充说明'}</p>
-                      <div className="rule-meta">
-                        <span>
-                          <CalendarDays size={15} />
-                          {r.schedule === 'daily'
-                            ? '每天'
-                            : r.schedule === 'once'
-                              ? r.on_date
-                              : `每周 ${r.weekdays.map((n) => weekdays[n]).join('、')}`}
-                        </span>
-                        <span className={`tag ${r.enabled ? 'approved' : 'rejected'}`}>
-                          {r.enabled ? '已启用' : '已停用'}
-                        </span>
-                      </div>
-                      <small>
-                        版本 {r.version} · {r.effective_from} 起生效
-                      </small>
-                    </article>
-                  ))}
+                        <p className="rule-description">{r.description || '暂无补充说明'}</p>
+                        <div className="rule-meta">
+                          <span>
+                            <CalendarDays size={15} />
+                            {r.schedule === 'daily'
+                              ? '每天'
+                              : r.schedule === 'once'
+                                ? r.on_date
+                                : `每周 ${r.weekdays.map((n) => weekdays[n]).join('、')}`}
+                          </span>
+                          <span className={`tag ${r.enabled ? 'approved' : 'rejected'}`}>
+                            {r.enabled ? '已启用' : '已停用'}
+                          </span>
+                        </div>
+                        <small>
+                          版本 {r.version} · {r.effective_from} 起生效
+                        </small>
+                      </article>
+                    ))}
                 </div>
                 {!data.rules.length && <Empty>从一个容易坚持的小任务开始吧。</Empty>}
               </section>
@@ -1135,6 +1279,29 @@ export default function App() {
           </>
         )}
       </main>
+      {skinOpen && (
+        <Modal title="我的换装间" close={() => setSkinOpen(false)}>
+          <div className="skin-options">
+            {[
+              ['dino', '恐龙探险', 'island-portrait'],
+              ['princess', '公主花园', 'princess-hero'],
+            ].map(([key, name, asset]) => (
+              <button
+                key={key}
+                className={key === skin ? 'chosen' : ''}
+                onClick={() => {
+                  setSkin(key);
+                  setSkinOpen(false);
+                }}
+              >
+                <img src={`/assets/${asset}.webp`} alt={name} />
+                <strong>{name}</strong>
+                <span>{key === skin ? '正在使用' : '使用这套皮肤'}</span>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
       {notice && (
         <div className="toast" role="status">
           <Sparkles size={20} />
@@ -1478,7 +1645,7 @@ function TaskDetail({
   return (
     <div>
       <div className="detail-hero">
-        <Tile icon={t.icon} />
+        <Tile icon={t.icon} subject={t.subject} />
         <div>
           <h3>{t.title}</h3>
           <p>
@@ -1549,141 +1716,173 @@ function RuleForm({
   busy: boolean;
   save: (v: unknown) => void;
 }) {
-  const initial = rule || task;
+  const [presetIndex, setPresetIndex] = useState(-1);
+  const initial = rule || task || (presetIndex >= 0 ? presets[presetIndex] : undefined);
   const [schedule, setSchedule] = useState(rule?.schedule || 'daily'),
     [days, setDays] = useState<number[]>(rule?.weekdays || [1, 2, 3, 4, 5]);
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        const f = new FormData(e.currentTarget);
-        save({
-          title: f.get('title'),
-          description: f.get('description'),
-          icon: f.get('icon'),
-          stars: Number(f.get('stars')),
-          daily_limit: Number(f.get('daily_limit')),
-          ...(!task
-            ? {
-                schedule,
-                weekdays: days,
-                on_date: schedule === 'once' ? f.get('on_date') : null,
-                enabled: f.get('enabled') === 'on',
-              }
-            : {}),
-        });
-      }}
-    >
-      <Field label="任务名称">
-        <input
-          name="title"
-          defaultValue={initial?.title}
-          required
-          maxLength={100}
-          placeholder="例如：读英文绘本"
-        />
-      </Field>
-      <Field label="给孩子的具体说明">
-        <textarea
-          name="description"
-          defaultValue={initial?.description}
-          maxLength={1000}
-          placeholder="怎样才算完成？写清楚，孩子更容易坚持。"
-        />
-      </Field>
-      <div className="form-row">
-        <Field label="每次获得星星">
-          <input
-            type="number"
-            name="stars"
-            min={1}
-            max={100}
-            defaultValue={initial?.stars || 1}
-            required
-          />
+    <>
+      {!rule && !task && (
+        <Field label="选择预制模板（可修改）">
+          <select value={presetIndex} onChange={(e) => setPresetIndex(Number(e.target.value))}>
+            <option value={-1}>自己创建子任务</option>
+            {Object.entries(subjects).map(([k, v]) => (
+              <optgroup key={k} label={v}>
+                {presets.map((p, i) =>
+                  p.subject === k ? (
+                    <option key={i} value={i}>
+                      {p.title}
+                    </option>
+                  ) : null,
+                )}
+              </optgroup>
+            ))}
+          </select>
         </Field>
-        <Field label="每天最多完成次数">
-          <input
-            type="number"
-            name="daily_limit"
-            min={1}
-            max={20}
-            defaultValue={initial?.daily_limit || 1}
-            required
-          />
-        </Field>
-      </div>
-      <Field label="任务图标">
-        <select name="icon" defaultValue={initial?.icon || 'book'}>
-          {Object.entries({
-            book: '📖 阅读',
-            brush: '🪥 清洁',
-            blocks: '🧩 整理',
-            leaf: '🌿 运动',
-            bed: '🌙 睡眠',
-            pencil: '✏️ 学习',
-            heart: '❤️ 关爱',
-          }).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-      </Field>
-      {!task && (
-        <>
-          <Field label="重复安排">
-            <select
-              value={schedule}
-              onChange={(e) => setSchedule(e.target.value as Rule['schedule'])}
-            >
-              <option value="daily">每天</option>
-              <option value="weekly">每周指定日</option>
-              <option value="once">指定日期（一次）</option>
-            </select>
-          </Field>
-          {schedule === 'weekly' && (
-            <div className="weekday-picks">
-              {[1, 2, 3, 4, 5, 6, 0].map((n) => (
-                <button
-                  type="button"
-                  className={days.includes(n) ? 'selected' : ''}
-                  key={n}
-                  onClick={() =>
-                    setDays(days.includes(n) ? days.filter((x) => x !== n) : [...days, n])
-                  }
-                >
-                  周{weekdays[n]}
-                </button>
-              ))}
-            </div>
-          )}
-          {schedule === 'once' && (
-            <Field label="任务日期">
-              <input
-                type="date"
-                name="on_date"
-                defaultValue={rule?.on_date || currentDate()}
-                min={rule ? shift(currentDate(), 1) : currentDate()}
-                required
-              />
-            </Field>
-          )}
-          <label className="check-field">
-            <input type="checkbox" name="enabled" defaultChecked={rule ? !!rule.enabled : true} />{' '}
-            启用这个任务模板
-          </label>
-          <p className="muted">
-            {rule
-              ? '修改从明天生效，不改变已生成的每日任务。'
-              : '新任务从今天开始安排，孩子打开即可看到。'}
-          </p>
-        </>
       )}
-      <button className="primary full" disabled={busy}>
-        {busy ? '正在保存…' : '保存任务规则'}
-      </button>
-    </form>
+      <form
+        key={presetIndex}
+        onSubmit={(e) => {
+          e.preventDefault();
+          const f = new FormData(e.currentTarget);
+          save({
+            title: f.get('title'),
+            subject: f.get('subject'),
+            description: f.get('description'),
+            icon: f.get('icon'),
+            stars: Number(f.get('stars')),
+            daily_limit: Number(f.get('daily_limit')),
+            ...(!task
+              ? {
+                  schedule,
+                  weekdays: days,
+                  on_date: schedule === 'once' ? f.get('on_date') : null,
+                  enabled: f.get('enabled') === 'on',
+                }
+              : {}),
+          });
+        }}
+      >
+        <Field label="一级科目">
+          <select name="subject" defaultValue={initial?.subject || 'chinese'}>
+            {Object.entries(subjects).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="任务名称">
+          <input
+            name="title"
+            defaultValue={initial?.title}
+            required
+            maxLength={100}
+            placeholder="例如：读英文绘本"
+          />
+        </Field>
+        <Field label="给孩子的具体说明">
+          <textarea
+            name="description"
+            defaultValue={initial?.description}
+            maxLength={1000}
+            placeholder="怎样才算完成？写清楚，孩子更容易坚持。"
+          />
+        </Field>
+        <div className="form-row">
+          <Field label="每次获得星星">
+            <input
+              type="number"
+              name="stars"
+              min={1}
+              max={100}
+              defaultValue={initial?.stars || 1}
+              required
+            />
+          </Field>
+          <Field label="每天最多完成次数">
+            <input
+              type="number"
+              name="daily_limit"
+              min={1}
+              max={20}
+              defaultValue={initial?.daily_limit || 1}
+              required
+            />
+          </Field>
+        </div>
+        <Field label="任务图标">
+          <select name="icon" defaultValue={initial?.icon || 'book'}>
+            {Object.entries({
+              book: '📖 阅读',
+              brush: '🪥 清洁',
+              blocks: '🧩 整理',
+              leaf: '🌿 运动',
+              bed: '🌙 睡眠',
+              pencil: '✏️ 学习',
+              heart: '❤️ 关爱',
+            }).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {!task && (
+          <>
+            <Field label="重复安排">
+              <select
+                value={schedule}
+                onChange={(e) => setSchedule(e.target.value as Rule['schedule'])}
+              >
+                <option value="daily">每天</option>
+                <option value="weekly">每周指定日</option>
+                <option value="once">指定日期（一次）</option>
+              </select>
+            </Field>
+            {schedule === 'weekly' && (
+              <div className="weekday-picks">
+                {[1, 2, 3, 4, 5, 6, 0].map((n) => (
+                  <button
+                    type="button"
+                    className={days.includes(n) ? 'selected' : ''}
+                    key={n}
+                    onClick={() =>
+                      setDays(days.includes(n) ? days.filter((x) => x !== n) : [...days, n])
+                    }
+                  >
+                    周{weekdays[n]}
+                  </button>
+                ))}
+              </div>
+            )}
+            {schedule === 'once' && (
+              <Field label="任务日期">
+                <input
+                  type="date"
+                  name="on_date"
+                  defaultValue={rule?.on_date || currentDate()}
+                  min={rule ? shift(currentDate(), 1) : currentDate()}
+                  required
+                />
+              </Field>
+            )}
+            <label className="check-field">
+              <input type="checkbox" name="enabled" defaultChecked={rule ? !!rule.enabled : true} />{' '}
+              启用这个任务模板
+            </label>
+            <p className="muted">
+              {rule
+                ? '修改从明天生效，不改变已生成的每日任务。'
+                : '新任务从今天开始安排，孩子打开即可看到。'}
+            </p>
+          </>
+        )}
+        <button className="primary full" disabled={busy}>
+          {busy ? '正在保存…' : '保存任务规则'}
+        </button>
+      </form>
+    </>
   );
 }
 function RewardForm({

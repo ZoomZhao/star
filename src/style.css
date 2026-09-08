@@ -2778,3 +2778,226 @@ hr {
 .login-art h1 span {
   text-shadow: none;
 }
+
+/* Subject navigation and themes share the same stored task rules. */
+.subject-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+.subject-tabs button {
+  min-height: 44px;
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  white-space: nowrap;
+  background: var(--paper);
+  font-weight: 650;
+}
+.subject-tabs button.active {
+  background: var(--green);
+  color: white;
+  border-color: var(--green);
+}
+.subject-art {
+  object-fit: cover;
+  background: none !important;
+  flex-shrink: 0;
+}
+.task-pagination {
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  align-items: center;
+  margin-top: 10px;
+}
+.task-pagination button {
+  min-height: 44px;
+}
+.skin-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.skin-options button {
+  display: flex;
+  flex-direction: column;
+  border: 2px solid var(--border);
+  border-radius: 20px;
+  padding: 12px;
+  gap: 12px;
+}
+.skin-options img {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+  border-radius: 14px;
+}
+.skin-options .chosen {
+  border-color: var(--green);
+}
+:root[data-skin='princess'] {
+  --cream: #fff5f4;
+  --paper: #fffcf9;
+  --green: #b24b73;
+  --deep: #723c55;
+  --muted: #96747e;
+  --border: #efced7;
+  color: #723c55;
+  background: #fff5f4;
+}
+[data-skin='princess'] .app,
+[data-skin='princess'] .workspace {
+  background: var(--cream);
+}
+[data-skin='princess'] .topbar,
+[data-skin='princess'] .navigation {
+  background: #fff9f9;
+}
+[data-skin='princess'] .navigation button.active,
+[data-skin='princess'] .balance-pill,
+[data-skin='princess'] .daily-summary {
+  background: #fbe0e7;
+  color: #8f3a60;
+  border-color: var(--border);
+}
+[data-skin='princess'] .adventure-progress {
+  background: #fff8f4ed;
+}
+[data-skin='princess'] .hero-copy h1 {
+  color: #944363;
+  text-shadow: 0 2px #fffaf0;
+}
+[data-skin='princess'] .identity .avatar {
+  background-image: url('/assets/princess-tasks.webp');
+}
+[data-skin='princess'] .tile-book,
+[data-skin='princess'] .tile-brush,
+[data-skin='princess'] .tile-blocks,
+[data-skin='princess'] .tile-leaf {
+  background-image: url('/assets/princess-tasks.webp');
+}
+@media (min-width: 901px) and (min-height: 600px) {
+  .child-app.page-today .daily-layout {
+    height: calc(100dvh - 116px);
+    min-height: 0;
+  }
+  .child-app.page-today .adventure {
+    min-height: 0;
+  }
+  .child-app.page-today .daily-content {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .child-app.page-today .task-grid {
+    flex: 1;
+    min-height: 0;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+  .child-app.page-today .task-card {
+    min-height: 0;
+    padding: 12px;
+  }
+  .child-app.page-today .task-main {
+    flex: 1;
+    min-height: 0;
+  }
+  .child-app.page-today .task-bottom {
+    margin-top: 6px;
+  }
+  .child-app.page-today .page-heading {
+    margin-bottom: 4px;
+  }
+  .child-app.page-today .date-strip {
+    margin-bottom: 0;
+  }
+  .child-app.page-today .date-strip > button {
+    min-height: 44px;
+    padding: 4px;
+  }
+  .child-app.page-today .subject-tabs {
+    margin: 8px 0;
+  }
+  .child-app.page-today .daily-summary {
+    margin-top: 8px;
+    padding: 10px 16px;
+  }
+  .child-app.page-today .footnote {
+    display: none;
+  }
+  .child-app.page-today .task-main .tile {
+    width: 58px;
+    height: 58px;
+  }
+  .child-app.page-today .task-title {
+    font-size: 16px;
+  }
+  .child-app.page-today .task-pagination {
+    margin-top: 6px;
+  }
+}
+[data-skin='princess'] .app .primary {
+  background: linear-gradient(#df83a1, #bf597f);
+  border-color: #ac456f;
+  box-shadow: 0 3px 0 #963c62;
+  color: #fff;
+}
+[data-skin='princess'] .app .secondary {
+  background: #fff4f6;
+  border-color: #edc3d1;
+  color: #934362;
+}
+[data-skin='princess'] .app .navigation button.active,
+[data-skin='princess'] .app .date-strip > button.selected,
+[data-skin='princess'] .app .subject-tabs button.active {
+  background: #b24b73;
+  color: #fff;
+  box-shadow: none;
+}
+[data-skin='princess'] .hero-copy p {
+  color: #944363;
+}
+[data-skin='princess'] .adventure,
+[data-skin='princess'] .daily-summary {
+  border-color: #edc3d1;
+  box-shadow: none;
+}
+.reward-management {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--paper);
+}
+.reward-management label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 650;
+}
+.reward-management select {
+  width: auto;
+  min-height: 44px;
+}
+.reward-management p {
+  flex: 1;
+  color: var(--muted);
+  margin: 0;
+  font-size: 13px;
+}
+.reward-status-action {
+  margin-top: 12px;
+  width: 100%;
+}
+@media (max-width: 600px) {
+  .reward-management p {
+    flex-basis: 100%;
+  }
+}

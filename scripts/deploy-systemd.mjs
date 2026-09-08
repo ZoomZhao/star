@@ -76,6 +76,7 @@ rmSync('artifacts/runtime/dist', { recursive: true, force: true });
 rmSync('artifacts/runtime/server', { recursive: true, force: true });
 cpSync('dist', 'artifacts/runtime/dist', { recursive: true });
 cpSync('server', 'artifacts/runtime/server', { recursive: true });
+cpSync('shared', 'artifacts/runtime/shared', { recursive: true });
 const tar = spawnSync('tar', [
   ...(process.platform === 'darwin' ? ['--no-xattrs', '--disable-copyfile'] : []),
   '-czf',
@@ -87,6 +88,7 @@ const tar = spawnSync('tar', [
   'node_modules',
   'dist',
   'server',
+  'shared',
 ]);
 if (tar.status !== 0) throw new Error('打包失败');
 remote(

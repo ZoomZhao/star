@@ -1,3 +1,4 @@
+export type Subject = 'chinese' | 'math' | 'english' | 'sports' | 'other';
 export type User = {
   id: string;
   family_id: string | null;
@@ -26,6 +27,7 @@ export type Task = {
   title: string;
   description: string;
   icon: string;
+  subject: Subject;
   stars: number;
   daily_limit: number;
   approved: number;
@@ -39,6 +41,7 @@ export type Rule = {
   title: string;
   description: string;
   icon: string;
+  subject: Subject;
   stars: number;
   daily_limit: number;
   schedule: 'daily' | 'weekly' | 'once';

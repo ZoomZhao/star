@@ -1,6 +1,8 @@
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
-let token = sessionStorage.getItem('star-token') || '';
+let token = localStorage.getItem('star-token') || sessionStorage.getItem('star-token') || '';
+if (token) localStorage.setItem('star-token', token);
+sessionStorage.removeItem('star-token');
 let customUrl = localStorage.getItem('star-server') || '';
 export const isNative = Capacitor.isNativePlatform();
 export const serverUrl = () => customUrl || import.meta.env.VITE_API_URL || '';
@@ -19,8 +21,8 @@ export async function initToken() {
 }
 export async function saveToken(t: string) {
   token = t;
-  if (t) sessionStorage.setItem('star-token', t);
-  else sessionStorage.removeItem('star-token');
+  if (t) localStorage.setItem('star-token', t);
+  else localStorage.removeItem('star-token');
   if (isNative) await Preferences.set({ key: 'star-token', value: t });
 }
 export async function api<T = Record<string, unknown>>(

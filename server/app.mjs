@@ -1,3 +1,4 @@
+import templates from '../shared/task-templates.json' with { type: 'json' };
 import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -37,6 +38,7 @@ const str = z.string().trim().min(1).max(100),
   id = z.string().uuid();
 const taskFields = z.object({
   title: str,
+  subject: z.enum(['chinese', 'math', 'english', 'sports', 'other']).default('other'),
   description,
   icon: z.enum(['book', 'brush', 'blocks', 'leaf', 'bed', 'pencil', 'heart']).default('book'),
   stars: z.number().int().min(1).max(100),
@@ -115,7 +117,7 @@ export function createApp(config = {}) {
       insert(db, 'sessions', {
         token_hash: hash(token),
         user_id: user.id,
-        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+        expires_at: new Date(Date.now() + 180 * 86400000).toISOString(),
       });
       res.json({ token, user: publicUser(user) });
     },
@@ -130,6 +132,13 @@ export function createApp(config = {}) {
       now(),
     );
     if (!u) fail(401, '登录已过期，请重新登录');
+    run(
+      db,
+      'UPDATE sessions SET expires_at=? WHERE token_hash=? AND expires_at<?',
+      new Date(Date.now() + 180 * 86400000).toISOString(),
+      hash(token),
+      new Date(Date.now() + 179 * 86400000).toISOString(),
+    );
     req.user = u;
     req.token = token;
     next();
@@ -183,6 +192,7 @@ export function createApp(config = {}) {
     insert(db, 'ledger', row);
     return row;
   };
+  app.get('/api/task-templates', (_req, res) => res.json(templates));
   app.get('/api/me', (req, res) => res.json(publicUser(req.user)));
   app.post('/api/logout', (req, res) => {
     run(db, 'DELETE FROM sessions WHERE token_hash=?', hash(req.token));
@@ -219,7 +229,7 @@ export function createApp(config = {}) {
     tx(db, () => materialize(db, c.id, date));
     const tasks = all(
       db,
-      `SELECT t.*, (SELECT COUNT(*) FROM submissions s WHERE s.task_id=t.id AND s.status='approved') approved, (SELECT COUNT(*) FROM submissions s WHERE s.task_id=t.id AND s.status='pending') pending FROM tasks t WHERE child_id=? AND date=? ORDER BY created_at,id`,
+      `SELECT t.*, (SELECT COUNT(*) FROM submissions s WHERE s.task_id=t.id AND s.status='approved') approved, (SELECT COUNT(*) FROM submissions s WHERE s.task_id=t.id AND s.status='pending') pending FROM tasks t WHERE child_id=? AND date=? ORDER BY CASE subject WHEN 'chinese' THEN 0 WHEN 'math' THEN 1 WHEN 'english' THEN 2 WHEN 'sports' THEN 3 ELSE 4 END,created_at,title,id`,
       c.id,
       date,
     );
@@ -256,7 +266,7 @@ export function createApp(config = {}) {
         ? []
         : all(
             db,
-            `SELECT s.*,t.title,t.icon,t.stars,t.date,t.description FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE s.child_id=? AND s.status='pending' ORDER BY s.created_at`,
+            `SELECT s.*,t.title,t.icon,t.subject,t.stars,t.date,t.description FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE s.child_id=? AND s.status='pending' ORDER BY s.created_at`,
             c.id,
           );
     const rules =
@@ -279,7 +289,7 @@ export function createApp(config = {}) {
       rules,
       rewards: all(
         db,
-        'SELECT * FROM rewards WHERE family_id=? AND active=1 ORDER BY cost',
+        `SELECT * FROM rewards WHERE family_id=? ${req.user.role === 'child' ? 'AND active=1' : ''} ORDER BY active DESC,cost,created_at,id`,
         c.family_id,
       ),
       redemptions: all(
@@ -438,10 +448,11 @@ export function createApp(config = {}) {
         fail(409, '任务已有提交，规则已冻结');
       run(
         db,
-        'UPDATE tasks SET title=?,description=?,icon=?,stars=?,daily_limit=? WHERE id=?',
+        'UPDATE tasks SET title=?,description=?,icon=?,subject=?,stars=?,daily_limit=? WHERE id=?',
         v.title,
         v.description,
         v.icon,
+        v.subject,
         v.stars,
         v.daily_limit,
         t.id,
@@ -633,7 +644,7 @@ export function createApp(config = {}) {
       })
       .parse(req.body);
     if (!get(db, 'SELECT id FROM families WHERE id=?', v.family_id)) fail(400, '家庭不存在');
-    res.status(201).json(createUser(db, v));
+    res.status(201).json(tx(db, () => createUser(db, v)));
   });
   app.patch('/api/admin/users/:userId', (req, res) => {
     role(req, 'admin');
@@ -680,12 +691,10 @@ export function createApp(config = {}) {
   }
   app.use((err, _req, res, _next) => {
     if (err instanceof z.ZodError)
-      return res
-        .status(400)
-        .json({
-          error: '请检查输入内容',
-          details: err.issues.map((i) => i.path.join('.') + ': ' + i.message),
-        });
+      return res.status(400).json({
+        error: '请检查输入内容',
+        details: err.issues.map((i) => i.path.join('.') + ': ' + i.message),
+      });
     if (err.type === 'entity.too.large')
       return res.status(413).json({ error: '备份文件超过 20MB 上限' });
     if (err instanceof SyntaxError && err.status === 400)

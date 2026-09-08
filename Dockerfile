@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY tsconfig.json vite.config.ts index.html ./
+COPY shared ./shared
 COPY src ./src
 COPY public ./public
 RUN npm run build
@@ -13,6 +14,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force && mkdir data backups && chown node:node data backups
 COPY --from=build /app/dist ./dist
+COPY shared ./shared
 COPY server ./server
 USER node
 EXPOSE 3001

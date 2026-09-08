@@ -13,8 +13,9 @@
     "build": "tsc -b && vite build",
     "test": "node --test tests/*.test.mjs",
     "test:e2e": "playwright test",
-    "android:sync": "npm run build && cap sync android",
-    "android:open": "cap open android"
+    "android:open": "open -a \"Android Studio\" android",
+    "android:build": "bash scripts/android-debug.sh",
+    "android:install": "bash scripts/android-debug.sh --install"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",

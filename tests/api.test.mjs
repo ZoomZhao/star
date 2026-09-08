@@ -312,3 +312,183 @@ test('invalid dates, weak passwords, and unsupported backups are rejected withou
     400,
   );
 });
+
+test('five subjects have two editable presets; category snapshots survive edits and backup', async (t) => {
+  const s = await setup(t);
+  const presets = await s.call('/api/task-templates', 'GET', null, s.parent.token);
+  assert.equal(presets.data.length, 10);
+  for (const subject of ['chinese', 'math', 'english', 'sports', 'other']) {
+    assert.equal(presets.data.filter((p) => p.subject === subject).length, 2);
+    assert.equal((await s.dashboard()).tasks.filter((p) => p.subject === subject).length, 2);
+  }
+  const d = await s.dashboard();
+  const task = d.tasks.find((t) => t.subject === 'english');
+  assert.equal(
+    (await s.call(`/api/tasks/${task.id}`, 'PATCH', { ...task, subject: 'math' }, s.parent.token))
+      .status,
+    200,
+  );
+  assert.equal((await s.dashboard()).tasks.find((t) => t.id === task.id).subject, 'math');
+  const rule = d.rules.find((r) => r.subject === 'english');
+  assert.equal(
+    (
+      await s.call(
+        `/api/rules/${rule.rule_key}`,
+        'PATCH',
+        { ...rule, subject: 'chinese', enabled: true },
+        s.parent.token,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await s.dashboard()).tasks.find((t) => t.rule_key === rule.rule_key).subject,
+    task.rule_key === rule.rule_key ? 'math' : 'english',
+  );
+  assert.equal(
+    (await s.dashboard(addDays(today(), 1))).tasks.find((t) => t.rule_key === rule.rule_key)
+      .subject,
+    'chinese',
+  );
+  assert.equal(
+    (
+      await s.call(
+        `/api/tasks/${task.id}`,
+        'PATCH',
+        { ...task, subject: 'invalid' },
+        s.parent.token,
+      )
+    ).status,
+    400,
+  );
+  const backup = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  assert.ok(backup.data.tasks.every((t) => typeof t.subject === 'string'));
+  assert.equal(
+    (
+      await s.call(
+        '/api/admin/restore',
+        'POST',
+        { backup, password: 'local-admin-2026' },
+        s.admin.token,
+      )
+    ).status,
+    200,
+  );
+  const p = await s.login('parent', 'parent123');
+  const restored = (
+    await s.call(`/api/children/${s.child.user.id}/dashboard`, 'GET', null, p.token)
+  ).data;
+  assert.equal(restored.tasks.find((t) => t.id === task.id).subject, 'math');
+});
+
+test('remembered sessions last 180 days, renew on use, logout and password reset revoke', async (t) => {
+  const s = await setup(t);
+  const expiry = get(
+    s.db,
+    'SELECT expires_at FROM sessions WHERE user_id=?',
+    s.child.user.id,
+  ).expires_at;
+  assert.ok(Date.parse(expiry) - Date.now() > 179 * 86400000);
+  s.db
+    .prepare('UPDATE sessions SET expires_at=? WHERE user_id=?')
+    .run(new Date(Date.now() + 86400000).toISOString(), s.child.user.id);
+  assert.equal((await s.call('/api/me', 'GET', null, s.child.token)).status, 200);
+  assert.ok(
+    Date.parse(
+      get(s.db, 'SELECT expires_at FROM sessions WHERE user_id=?', s.child.user.id).expires_at,
+    ) -
+      Date.now() >
+      179 * 86400000,
+  );
+  await s.call('/api/logout', 'POST', {}, s.child.token);
+  assert.equal((await s.call('/api/me', 'GET', null, s.child.token)).status, 401);
+  const c = await s.login('child', 'child123');
+  await s.call(
+    '/api/password',
+    'POST',
+    { current: 'child123', password: 'new-child-password' },
+    c.token,
+  );
+  assert.equal((await s.call('/api/me', 'GET', null, c.token)).status, 401);
+});
+
+test('parents manage active and inactive family rewards; children only see and redeem active items', async (t) => {
+  const s = await setup(t),
+    path = `/api/children/${s.child.user.id}`;
+  const created = await s.call(
+    path + '/rewards',
+    'POST',
+    { title: '管理测试奖励', description: '初始说明', icon: 'gift', cost: 3 },
+    s.parent.token,
+  );
+  assert.equal(created.status, 201);
+  const reward = created.data;
+  const pending = await s.call(
+    path + '/redemptions',
+    'POST',
+    { reward_id: reward.id },
+    s.child.token,
+    uid(),
+  );
+  assert.equal(pending.status, 200);
+  const edit = {
+    title: '修改后的奖励',
+    description: '新说明',
+    icon: 'toy',
+    cost: 8,
+    active: false,
+  };
+  assert.equal(
+    (await s.call(`/api/rewards/${reward.id}`, 'PATCH', edit, s.child.token)).status,
+    403,
+  );
+  assert.equal((await s.call(path + '/rewards', 'POST', edit, s.child.token)).status, 403);
+  const otherFamily = (
+    await s.call('/api/admin/families', 'POST', { name: '其他家庭' }, s.admin.token)
+  ).data;
+  await s.call(
+    '/api/admin/users',
+    'POST',
+    {
+      family_id: otherFamily.id,
+      username: 'rewardparent',
+      name: '另一个家长',
+      role: 'parent',
+      password: 'reward-parent-pass',
+    },
+    s.admin.token,
+  );
+  const foreign = await s.login('rewardparent', 'reward-parent-pass');
+  assert.equal(
+    (await s.call(`/api/rewards/${reward.id}`, 'PATCH', edit, foreign.token)).status,
+    403,
+  );
+  assert.equal((await s.call(path + '/dashboard', 'GET', null, foreign.token)).status, 403);
+  assert.equal(
+    (await s.call(`/api/rewards/${reward.id}`, 'PATCH', edit, s.parent.token)).status,
+    200,
+  );
+  const parentData = await s.dashboard();
+  const inactive = parentData.rewards.find((r) => r.id === reward.id);
+  assert.equal(inactive.active, 0);
+  assert.equal(inactive.cost, 8);
+  const childData = (await s.call(path + '/dashboard', 'GET', null, s.child.token)).data;
+  assert.ok(!childData.rewards.some((r) => r.id === reward.id));
+  assert.equal(
+    (await s.call(path + '/redemptions', 'POST', { reward_id: reward.id }, s.child.token, uid()))
+      .status,
+    404,
+  );
+  assert.equal(parentData.redemptions.find((r) => r.id === pending.data.id).title, '管理测试奖励');
+  assert.equal(parentData.redemptions.find((r) => r.id === pending.data.id).cost, 3);
+  assert.equal(
+    (await s.call(`/api/rewards/${reward.id}`, 'PATCH', { ...edit, active: true }, s.parent.token))
+      .status,
+    200,
+  );
+  const visible = (await s.call(path + '/dashboard', 'GET', null, s.child.token)).data.rewards.find(
+    (r) => r.id === reward.id,
+  );
+  assert.equal(visible.title, '修改后的奖励');
+  assert.equal(visible.cost, 8);
+});

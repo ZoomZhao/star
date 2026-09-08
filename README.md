@@ -1,15 +1,17 @@
 # 星星探险家
 
-儿童习惯养成应用：家长分配任务，小朋友按次提交，家长确认后发星；星星可用于奖励兑换、购买记账或行为扣星。Android 手机 / Pad 与手机 Web 共用业务界面。
+儿童习惯养成应用：家长分配任务，小朋友按次提交，家长确认后发星；星星可用于奖励兑换、购买记账或行为扣星。Android 手机 / Pad 使用原生 Android Views 界面，手机 Web 使用 React，两端共用 HTTPS API 和 SQLite 数据。
 
 ## 已实现
 
-- 独立的平板横屏布局：侧边导航、恐龙岛场景、两列任务；手机采用上下布局和底部导航。
+- 原生 Android 平板横屏：插画侧边导航、固定场景和日期、科目切换，两列任务在右侧区域独立滚动；窄屏使用底部导航。今日获得移到顶部，隐藏当日可得总数。
+- 五个一级科目：语文、数学、英语、体育、其他；每科两个预制模板，新小朋友自动配置 10 个起步任务。
+- 恐龙探险与公主花园两套皮肤，选择保存在设备上。五张 ImageGen 科目插画在两端共用。
 - ImageGen 先生成手机与横屏平板设计，再用真实组件还原。任务插画、角色互动、音效开关、Android 触感与提交反馈。
 - 每日任务 / 日期切换 / 规则详情 / 重复完成次数与每日上限 / 家长审批及代完成。
 - 每日、每周、指定日期任务模板；模板版本与每日任务快照；当天无提交任务可单独修改。
 - 星星余额、累计获得和消耗、近 7 日图表、按日流水、额外奖励、消费、扣星、反向流水撤销。
-- 奖励商品管理、孩子申请兑换、家长审核后扣星；申请记录保存当时的商品名及价格。
+- 家长在奖励小铺新增、编辑名称/说明/图片图标/星星价格，按全部/已上架/已下架筛选，快捷下架或重新上架，并进入兑换审核。孩子只看到上架奖励；已有兑换申请保留当时的商品名及价格。
 - 超级管理员创建家庭并预分配家长 / 孩子账号，支持禁用、重置密码；无公开注册。
 - 完整 JSON 备份下载和事务恢复，恢复前自动备份，恢复后登录失效。
 
@@ -45,24 +47,18 @@ npm run dev
 sdk.dir=/你的/Android/SDK/路径
 ```
 
-USB 实机调试（先启动本地服务、连接设备并允许 USB 调试）：
+构建与安装原生体验包：
 
 ```sh
-./scripts/android-debug.sh
+npm run android:build
+npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-脚本构建 APK，建立 `adb reverse tcp:3001 tcp:3001`，安装并启动。产物在 `artifacts/star-explorer-usb-debug.apk`。此包访问本机开发服务器，拔掉 USB 或停止服务后无法提交；不用于正式分发。
+产物为 `artifacts/star-explorer-native.apk`（0.2.3-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
 
-正式环境构建：
+发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 
-```sh
-VITE_API_URL=https://你的域名 npm run build
-npx cap sync android
-cd android
-./gradlew :app:assembleRelease
-```
-
-正式包仅使用 HTTPS；需要在 Android Studio 配置自己的发布签名后签名。不要使用 USB 调试配置发布。也可不设置 `VITE_API_URL`，在 Android 登录页填写 HTTPS 服务器地址。
+原生界面测试必须使用独立包名：先启动 `node scripts/native-fixture.mjs`，运行 `adb reverse tcp:3004 tcp:3004`，再以 `./android/gradlew -p android -PisolatedTestApp :app:assembleDebug :app:assembleDebugAndroidTest` 构建测试版（`com.starexplorer.app.testbed`）。安装两个测试 APK 后，用 `adb shell am instrument -w -e class com.starexplorer.app.CompletionAnimationTest com.starexplorer.app.testbed.test/androidx.test.runner.AndroidJUnitRunner` 验证动画。测试 API 使用独立内存数据库，不写生产任务或账本。不要在日常使用包名上运行 Gradle connected 测试，其结束清理可能卸载应用。测试构建后交付前必须重新运行 `npm run android:build`，保证交付产物使用正式包名。
 
 ## ECS 部署（当前已上线）
 
@@ -85,7 +81,7 @@ cd android
 | parent | PARENT_PASSWORD | 审核任务、设置规则和奖励         |
 | child  | CHILD_PASSWORD  | 查看每日任务、提交完成、兑换奖励 |
 
-已预分配“我的家庭”，初始四项任务：阅读（1 星 × 2 次）、刷牙（1 星 × 2 次）、整理玩具（2 星 × 1 次）、户外运动（2 星 × 1 次），每日最多 8 星。初始余额为 0。初始奖励为冰淇淋和玩具，规则和价格均可由家长修改。管理员可在预分配新账号时设置孩子称呼。
+现有账号及密码保持不变，升级时已为小朋友补齐五科共 10 个模板；没有修改星星账本。预制内容见 `shared/task-templates.json`，家长可修改或停用。初始奖励为冰淇淋和玩具，规则和价格均可由家长修改。管理员可在预分配新账号时设置孩子称呼。
 
 连接参数 `ECS_HOST`、`ECS_USER`、`ECS_SSH_PORT`、`ECS_PASSWORD`、`DOMAIN` 位于 `.env`。SSH 密码通过 ASKPASS 读取，不作为命令参数或上传内容；服务端只接收应用所需环境变量。
 
@@ -105,7 +101,7 @@ node scripts/ecs-command.mjs 'systemctl status star star-web --no-pager'
 node scripts/ecs-command.mjs 'journalctl -u star -n 50 --no-pager'
 ```
 
-域名正式版 Android 的服务地址为 `https://star.zoomzhao.com`。已安装的 `artifacts/star-explorer-online.apk` 为可联网的调试签名体验包；后续公开发布需使用自己的 release 签名。安装后无需 USB 网络转发。
+域名正式版 Android 的服务地址为 `https://star.zoomzhao.com`。新原生体验包为 `artifacts/star-explorer-native.apk`；旧 `star-explorer-online.apk` 是先前的 Capacitor 版本。后续公开发布需使用自己的 release 签名。
 
 ## 数据与规则
 
@@ -116,7 +112,8 @@ node scripts/ecs-command.mjs 'journalctl -u star -n 50 --no-pager'
 - 已有任意提交记录的任务冻结规则。已记账记录不修改，撤销追加反向流水，保留审批记录及已完成次数。
 - 账本按任务归属日期记录任务收入；额外奖励、消费和撤销按操作当天记录。累计收支包含反向流水，因此它们是全部账目总额。
 - 任务提交、记账、兑换使用幂等编号，网络失败重试复用编号。服务端对重复审批和重复兑换结算也有唯一约束。
-- 手机 Web 会话保存在当前浏览器标签页；Android 会话保存在应用私有 Preferences。退出、更改密码、管理员重置密码和恢复备份会撤销相关登录。
+- Web 使用 localStorage 保留登录，Android 使用 Keystore AES-GCM 加密会话令牌后存入私有 Preferences；不保存明文密码。会话有效期为 180 天未使用，每日使用会续期。主动退出、更改密码、管理员停用/重置账号或恢复备份后重新登录。
+- 科目写入规则和每一天的任务快照，也包含在备份中。当前存量数据升级只补充科目和缺少的起步模板，账号、密码和账本保留。
 - 第一版无需离线提交；失去网络时展示提示，恢复后重试。账本页面最多显示最近 1000 笔，完整历史始终包含在备份内。
 
 ## 备份与恢复
@@ -141,8 +138,8 @@ npm run test:e2e     # 浏览器端完整流程，独立内存数据库，不影
 npm run build       # TypeScript + Web 生产构建
 ```
 
-浏览器测试使用本机 Chrome，启动独立 3002 / 5174 端口。Android 已在连接的 `DMG-W00 / Android 12 / 2800 × 1840` 平板构建、安装，验证横竖屏、登录、任务详情、恐龙交互和星星口袋。线上版本另验证 HTTPS 与取消 USB 网络转发后的访问。
+浏览器测试使用本机 Chrome，启动独立 3002 / 5174 端口。此前 10 个 API 测试与 6 个浏览器流程通过。Android 0.2.3-native 构建通过，模拟器按平板 2800×1840 / 400 dpi 验证两套皮肤、区域滚动、固定控件、家长奖励管理入口和完成动画，RefinementTest 两项流程通过。最新实屏预览和 ImageGen 稿件见 `docs/design/native/IMPLEMENTATION.md`。DMG-W00 上保留 0.2.2-native 与登录数据，本次 0.2.3-native 安装等待解锁。
 
 设计图、生成提示词位于 `docs/design/`；界面截图位于 `docs/screenshots/`。原始 PNG 保留在设计目录，应用使用压缩 WebP。
 
-官方参考：[Capacitor Android](https://capacitorjs.com/docs/android)、[Node SQLite API](https://nodejs.org/docs/latest-v24.x/api/sqlite.html)。
+官方参考：[Android Views](https://developer.android.com/develop/ui/views/layout/declaring-layout)、[Node SQLite API](https://nodejs.org/docs/latest-v24.x/api/sqlite.html)。

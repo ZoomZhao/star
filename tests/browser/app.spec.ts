@@ -32,6 +32,8 @@ test('tablet child submits, parent approves, wallet and reward request complete'
   expect(made.ok()).toBeTruthy();
   await page.reload();
   const card = page.locator('.task-card').filter({ hasText: title });
+  for (let i = 0; i < 10 && !(await card.count()); i++)
+    await page.getByRole('button', { name: '下一页', exact: true }).click();
   await card.getByRole('button', { name: '我完成啦' }).click();
   await page.getByRole('textbox', { name: '想告诉家长的话（可选）' }).fill('今天我读了一个故事');
   await page.getByRole('button', { name: '我完成了 1 次，请家长确认' }).click();
@@ -129,4 +131,92 @@ test('admin creates a family and allocated child account, downloads a backup', a
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: '下载完整备份' }).click();
   expect((await download).suggestedFilename()).toContain('star-backup-');
+});
+
+test('remembered login, subject presets, skins, and landscape main actions stay visible', async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 1120, height: 704 });
+  await login(page);
+  for (const label of ['语文', '数学', '英语', '体育', '其他']) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    await expect(page.locator('.subject-art').first()).toHaveAttribute('alt', label);
+  }
+  await page.getByRole('button', { name: '全部', exact: true }).click();
+  for (const button of await page
+    .locator('.task-card button.primary,.task-pagination button')
+    .all()) {
+    const box = await button.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.y + box!.height).toBeLessThanOrEqual(704);
+  }
+  await page.getByRole('button', { name: '换装', exact: true }).click();
+  await page.getByRole('button', { name: /公主花园/ }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-skin', 'princess');
+  await page.screenshot({ path: 'artifacts/web-princess-landscape.png', fullPage: true });
+  const another = await context.newPage();
+  await another.goto('/');
+  await expect(another.getByRole('button', { name: '设置', exact: true })).toBeVisible();
+  await expect(another.locator('html')).toHaveAttribute('data-skin', 'princess');
+  await another.close();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '退出 / 更换账号' }).click();
+  await expect(page.getByRole('button', { name: '出发，去星星岛', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: '出发，去星星岛', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '家长', exact: true }).click();
+  await page.getByRole('button', { name: '任务规则', exact: true }).click();
+  await page.getByRole('button', { name: '添加任务', exact: true }).click();
+  await page.getByLabel('选择预制模板（可修改）').selectOption('3');
+  await expect(page.getByLabel('一级科目')).toHaveValue('math');
+  await expect(page.getByLabel('任务名称', { exact: true })).toHaveValue('数学趣味挑战');
+});
+
+test('parent can edit a pending reward, take it off sale and put it back', async ({
+  page,
+  request,
+}) => {
+  await login(page, 'parent');
+  await page.getByRole('button', { name: '奖励小铺', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '奖励小铺管理', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '添加奖励', exact: true }).click();
+  const title = '家长管理奖励 ' + Date.now();
+  await page.getByLabel('奖励名称', { exact: true }).fill(title);
+  await page.getByLabel('兑换所需星星').fill('2');
+  await page.getByRole('button', { name: '保存奖励', exact: true }).click();
+  const card = page.locator('.reward-card').filter({ hasText: title });
+  await expect(card).toContainText('已上架');
+  const loginResponse = await request.post('http://127.0.0.1:3002/api/login', {
+    data: { username: 'child', password: 'child123' },
+  });
+  const child = await loginResponse.json();
+  const headers = { Authorization: 'Bearer ' + child.token };
+  const dashboard = await (
+    await request.get(`http://127.0.0.1:3002/api/children/${child.user.id}/dashboard`, { headers })
+  ).json();
+  const reward = dashboard.rewards.find((r: any) => r.title === title);
+  await request.post(`http://127.0.0.1:3002/api/children/${child.user.id}/redemptions`, {
+    headers: { ...headers, 'Idempotency-Key': randomUUID() },
+    data: { reward_id: reward.id },
+  });
+  await page.reload();
+  await page.getByRole('button', { name: '奖励小铺', exact: true }).click();
+  await card.getByRole('button', { name: '编辑奖励', exact: true }).click();
+  await page.getByLabel('奖励说明').fill('家长修改的说明');
+  await page.getByLabel('兑换所需星星').fill('4');
+  await page.getByRole('button', { name: '保存奖励', exact: true }).click();
+  await expect(card).toContainText('家长修改的说明');
+  await card.getByRole('button', { name: '下架奖励', exact: true }).click();
+  await expect(card).toContainText('已下架');
+  await page.getByLabel('奖励状态', { exact: true }).selectOption('active');
+  await expect(card).toHaveCount(0);
+  await page.getByLabel('奖励状态', { exact: true }).selectOption('inactive');
+  await expect(card).toBeVisible();
+  await card.getByRole('button', { name: '重新上架', exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await page.getByLabel('奖励状态', { exact: true }).selectOption('active');
+  await expect(card).toContainText('已上架');
+  await page.getByRole('button', { name: '审核兑换申请', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '看看孩子的努力' })).toBeVisible();
 });
