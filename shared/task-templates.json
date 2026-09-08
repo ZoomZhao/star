@@ -78,5 +78,29 @@
     "icon": "blocks",
     "stars": 2,
     "daily_limit": 1
+  },
+  {
+    "subject": "chinese",
+    "title": "课内作业",
+    "description": "认真完成语文课内作业，基础奖励 2 颗星；表现出色时，家长可额外奖励 1 颗星。",
+    "icon": "pencil",
+    "stars": 2,
+    "daily_limit": 1
+  },
+  {
+    "subject": "math",
+    "title": "课内作业",
+    "description": "认真完成数学课内作业，基础奖励 2 颗星；表现出色时，家长可额外奖励 1 颗星。",
+    "icon": "pencil",
+    "stars": 2,
+    "daily_limit": 1
+  },
+  {
+    "subject": "english",
+    "title": "课内作业",
+    "description": "认真完成英语课内作业，基础奖励 2 颗星；表现出色时，家长可额外奖励 1 颗星。",
+    "icon": "pencil",
+    "stars": 2,
+    "daily_limit": 1
   }
 ]

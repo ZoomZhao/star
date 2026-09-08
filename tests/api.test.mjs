@@ -4,7 +4,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.mjs';
-import { addDays, today, uid, get } from '../server/db.mjs';
+import { addDays, today, uid, get, seedTemplates } from '../server/db.mjs';
 async function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), 'star-test-'));
   const { app, db } = createApp({
@@ -313,13 +313,14 @@ test('invalid dates, weak passwords, and unsupported backups are rejected withou
   );
 });
 
-test('five subjects have two editable presets; category snapshots survive edits and backup', async (t) => {
+test('five subjects have editable presets and three homework tasks; category snapshots survive edits and backup', async (t) => {
   const s = await setup(t);
   const presets = await s.call('/api/task-templates', 'GET', null, s.parent.token);
-  assert.equal(presets.data.length, 10);
+  assert.equal(presets.data.length, 13);
   for (const subject of ['chinese', 'math', 'english', 'sports', 'other']) {
-    assert.equal(presets.data.filter((p) => p.subject === subject).length, 2);
-    assert.equal((await s.dashboard()).tasks.filter((p) => p.subject === subject).length, 2);
+    const count = ['sports', 'other'].includes(subject) ? 2 : 3;
+    assert.equal(presets.data.filter((p) => p.subject === subject).length, count);
+    assert.equal((await s.dashboard()).tasks.filter((p) => p.subject === subject).length, count);
   }
   const d = await s.dashboard();
   const task = d.tasks.find((t) => t.subject === 'english');
@@ -683,6 +684,78 @@ test('restore rejects invalid ownership, approvals and ledger links without touc
         '/api/admin/restore',
         'POST',
         { backup: baseline, password: 'local-admin-2026' },
+        s.admin.token,
+      )
+    ).status,
+    200,
+  );
+});
+
+test('homework seeds once per subject and all tasks support optional parent bonus', async (t) => {
+  const s = await setup(t);
+  seedTemplates(s.db, s.child.user.id);
+  seedTemplates(s.db, s.child.user.id);
+  const d = await s.dashboard();
+  const homework = d.tasks.filter((t) => t.title === '课内作业');
+  assert.deepEqual(homework.map((t) => t.subject).sort(), ['chinese', 'english', 'math']);
+  assert.ok(homework.every((t) => t.stars === 2 && t.daily_limit === 1));
+  assert.equal(d.rules.filter((t) => t.title === '课内作业').length, 3);
+  const task = d.tasks.find((t) => t.subject === 'sports');
+  assert.equal(
+    (await s.call(`/api/tasks/${task.id}/submit`, 'POST', { bonus: true }, s.child.token, uid()))
+      .status,
+    400,
+  );
+  const submission = await s.call(`/api/tasks/${task.id}/submit`, 'POST', {}, s.child.token, uid());
+  assert.equal(
+    (
+      await s.call(
+        `/api/submissions/${submission.data.id}/review`,
+        'POST',
+        { approve: false, bonus: true },
+        s.parent.token,
+      )
+    ).status,
+    400,
+  );
+  const results = await Promise.all(
+    [1, 2].map(() =>
+      s.call(
+        `/api/submissions/${submission.data.id}/review`,
+        'POST',
+        { approve: true, bonus: true },
+        s.parent.token,
+      ),
+    ),
+  );
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+  assert.equal((await s.dashboard()).wallet.balance, d.wallet.balance + task.stars + 1);
+  const key = uid();
+  for (let i = 0; i < 2; i++)
+    assert.equal(
+      (
+        await s.call(
+          `/api/tasks/${homework[0].id}/submit`,
+          'POST',
+          { bonus: true },
+          s.parent.token,
+          key,
+        )
+      ).status,
+      200,
+    );
+  assert.equal(
+    (await s.call(`/api/tasks/${homework[0].id}/submit`, 'POST', {}, s.parent.token, key)).status,
+    409,
+  );
+  assert.equal((await s.dashboard()).wallet.balance, d.wallet.balance + task.stars + 4);
+  const backup = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  assert.equal(
+    (
+      await s.call(
+        '/api/admin/restore',
+        'POST',
+        { backup, password: 'local-admin-2026' },
         s.admin.token,
       )
     ).status,

@@ -803,11 +803,7 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private LinearLayout earnedBadge() {
-    int earned = 0;
-    for (int i = 0; i < array(data, "tasks").length(); i++) {
-      JSONObject task = obj(array(data, "tasks"), i);
-      earned += task.optInt("approved") * task.optInt("stars");
-    }
+    int earned = data.optInt("dayEarned");
     LinearLayout badge = ui.row();
     badge.setTag("daily-earned");
     badge.setGravity(Gravity.CENTER);
@@ -989,7 +985,7 @@ public class MainActivity extends AppCompatActivity {
     ui.gap(copy, 10);
     ui.add(copy, ui.label(subjectName(t) + " · 每次 " + t.optInt("stars") + " 星"), -2);
     ui.gap(copy, 8);
-    ui.add(copy, ui.label("每日上限 " + t.optInt("daily_limit") + " 次"), -2);
+    ui.add(copy, ui.label("每天最多 " + t.optInt("daily_limit") + " 次 · 可额外奖励 1 星"), -2);
     top.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
     ui.grow(card, top);
     ui.gap(card, compact() ? 4 : 8);
@@ -1136,6 +1132,10 @@ public class MainActivity extends AppCompatActivity {
         t.optInt("pending") +
         " 次。"
     );
+    CheckBox bonus = new CheckBox(this);
+    bonus.setText("额外奖励 1 颗星");
+    if (parent()) f.addView(bonus);
+    ui.line(f, "家长可额外奖励 1 颗星");
     EditText note = ui.input(
       f,
       "想告诉家长的话（选填）",
@@ -1168,7 +1168,7 @@ public class MainActivity extends AppCompatActivity {
         mutation(
           "/api/tasks/" + t.optString("id") + "/submit",
           "POST",
-          json("note", note.getText().toString()),
+          json("note", note.getText().toString(), "bonus", parent() && bonus.isChecked()),
           true,
           parent() ? "已发放星星 ★" : "已提交！等家长确认后就能收到星星啦"
         )
@@ -1740,6 +1740,9 @@ public class MainActivity extends AppCompatActivity {
                 "",
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
               );
+              CheckBox bonus = new CheckBox(this);
+              bonus.setText("额外奖励 1 颗星（共 " + (r.optInt("stars") + 1) + " 星）");
+              if (task && approve) f.addView(bonus);
               dialog(approve ? "确认通过" : "退回申请", f, approve ? "通过" : "退回", () ->
                 mutation(
                   "/api/" +
@@ -1748,7 +1751,7 @@ public class MainActivity extends AppCompatActivity {
                     r.optString("id") +
                     "/review",
                   "POST",
-                  json("approve", approve, "note", note.getText().toString()),
+                  json("approve", approve, "note", note.getText().toString(), "bonus", task && approve && bonus.isChecked()),
                   false,
                   approve ? "已通过" : "已退回"
                 )

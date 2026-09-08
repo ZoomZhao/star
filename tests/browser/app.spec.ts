@@ -46,10 +46,10 @@ test('tablet child submits, parent approves, wallet and reward request complete'
   await page.getByRole('button', { name: /^待确认/ }).click();
   const review = page.locator('.review-card').filter({ hasText: title });
   await expect(review).toContainText('今天我读了一个故事');
-  await review.getByRole('button', { name: '通过 +2' }).click();
+  await review.getByRole('button', { name: '通过并奖励 +3' }).click();
   await expect(review).toHaveCount(0);
   await page.getByRole('button', { name: '星星口袋', exact: true }).click();
-  await expect(page.locator('.ledger-row').filter({ hasText: title })).toContainText('+2');
+  await expect(page.locator('.ledger-row').filter({ hasText: title })).toContainText('+3');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '退出 / 更换账号' }).click();
   await page.getByRole('button', { name: '小朋友', exact: true }).click();

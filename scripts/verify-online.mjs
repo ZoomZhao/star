@@ -37,18 +37,30 @@ try {
         tasks: d.tasks.length,
         subjects: [...new Set(d.tasks.map((t) => t.subject))].sort(),
         rules: d.rules.length,
+        homework: d.tasks
+          .filter((t) => t.title === '课内作业')
+          .map((t) => ({ subject: t.subject, stars: t.stars, daily_limit: t.daily_limit })),
       });
     }
     return { presetCount: presets.length, dashboards };
   });
-  if (result.presetCount !== 10 || result.dashboards.some((d) => d.subjects.length !== 5))
+  if (
+    result.presetCount !== 13 ||
+    result.dashboards.some(
+      (d) =>
+        d.subjects.length !== 5 ||
+        d.homework.length !== 3 ||
+        new Set(d.homework.map((t) => t.subject)).size !== 3 ||
+        d.homework.some((t) => t.stars !== 2 || t.daily_limit !== 1),
+    )
+  )
     throw Error('科目模板检查失败');
   for (const key of ['chinese', 'math', 'english', 'sports', 'other']) {
     const r = await context.request.get(origin + '/assets/subjects/' + key + '.webp');
     if (!r.ok()) throw Error('科目图片缺失');
   }
   console.log(
-    'Production HTTPS verified: persistent admin login, five category images and ten presets. ' +
+    'Production HTTPS verified: persistent admin login, five category images and thirteen presets. ' +
       JSON.stringify(result),
   );
   console.log(

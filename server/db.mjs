@@ -71,6 +71,15 @@ export function openDb(path) {
       );
     }
   }
+  if (
+    !db
+      .prepare('PRAGMA table_info(submissions)')
+      .all()
+      .some((c) => c.name === 'bonus')
+  )
+    db.exec(
+      'ALTER TABLE submissions ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0 CHECK(bonus IN (0,1))',
+    );
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
   return db;
 }
@@ -114,9 +123,17 @@ export function createUser(db, { family_id = null, username, name, role, passwor
   if (role === 'child') seedTemplates(db, user.id);
   return publicUser(user);
 }
-export function seedTemplates(db, childId) {
-  for (const preset of templates) {
-    if (get(db, 'SELECT id FROM rules WHERE child_id=? AND title=?', childId, preset.title))
+export function seedTemplates(db, childId, presets = templates) {
+  for (const preset of presets) {
+    if (
+      get(
+        db,
+        'SELECT id FROM rules WHERE child_id=? AND title=? AND subject=?',
+        childId,
+        preset.title,
+        preset.subject,
+      )
+    )
       continue;
     insert(db, 'rules', {
       ...preset,

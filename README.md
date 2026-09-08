@@ -5,7 +5,7 @@
 ## 已实现
 
 - 原生 Android 平板横屏：插画侧边导航、固定场景和日期、科目切换，两列任务在右侧区域独立滚动；窄屏使用底部导航。今日获得移到顶部，隐藏当日可得总数。
-- 五个一级科目：语文、数学、英语、体育、其他；每科两个预制模板，新小朋友自动配置 10 个起步任务。
+- 五个一级科目：语文、数学、英语、体育、其他；语文、数学、英语各三个预制模板，体育和其他各两个，新小朋友自动配置 13 个起步任务。
 - 恐龙探险与公主花园两套皮肤，选择保存在设备上。五张 ImageGen 科目插画在两端共用。
 - ImageGen 先生成手机与横屏平板设计，再用真实组件还原。任务插画、角色互动、音效开关、Android 触感与提交反馈。
 - 每日任务 / 日期切换 / 规则详情 / 重复完成次数与每日上限 / 家长审批及代完成。
@@ -54,7 +54,7 @@ npm run android:build
 npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-产物为 `artifacts/star-explorer-native.apk`（0.2.5-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
+产物为 `artifacts/star-explorer-native.apk`（0.2.6-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
 
 发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 
@@ -104,6 +104,9 @@ node scripts/ecs-command.mjs 'journalctl -u star -n 50 --no-pager'
 域名正式版 Android 的服务地址为 `https://star.zoomzhao.com`。新原生体验包为 `artifacts/star-explorer-native.apk`；旧 `star-explorer-online.apk` 是先前的 Capacitor 版本。后续公开发布需使用自己的 release 签名。
 
 ## 数据与规则
+
+- 语文、数学、英语各有「课内作业」，每天一次，基础 2 星。所有任务在家长审批或代完成时均可选择额外奖励 1 星，默认不选；与基础星星一起结算、撤销。
+- 存量孩子通过 `node --env-file=/opt/star/server.env server/seed-homework.mjs` 补充三科课内作业，重复运行不会重复添加。
 
 - 北京时间自然日。孩子只能提交当天；家长可以代完成过去日期，不能预先完成未来任务。
 - 待审核 + 已通过次数共同占用每日上限；退回释放名额。每条提交只能审批一次。

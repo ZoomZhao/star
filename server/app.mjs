@@ -309,12 +309,17 @@ export function createApp(config = {}) {
     const task = get(db, 'SELECT * FROM tasks WHERE id=?', id.parse(req.params.taskId));
     if (!task) fail(404, '任务不存在');
     child(req, task.child_id);
-    const v = z.object({ note: description }).parse(req.body);
+    const v = z.object({ note: description, bonus: z.boolean().default(false) }).parse(req.body);
+    if (v.bonus && req.user.role === 'child') fail(400, '不能发放额外奖励');
     const requestKey = key(req);
     const result = tx(db, () => {
       const existing = get(db, 'SELECT * FROM submissions WHERE request_key=?', requestKey);
       if (existing) {
-        if (existing.task_id !== task.id || existing.note !== v.note)
+        if (
+          existing.task_id !== task.id ||
+          existing.note !== v.note ||
+          (req.user.role !== 'child' && existing.bonus !== Number(v.bonus))
+        )
           fail(409, '操作编号已用于其他内容，请刷新后重试');
         return existing;
       }
@@ -332,6 +337,7 @@ export function createApp(config = {}) {
         task_id: task.id,
         child_id: task.child_id,
         status: approved ? 'approved' : 'pending',
+        bonus: Number(v.bonus),
         note: v.note,
         review_note: '',
         reviewed_by: approved ? req.user.id : null,
@@ -343,10 +349,10 @@ export function createApp(config = {}) {
       if (approved)
         postLedger({
           childId: task.child_id,
-          amount: task.stars,
+          amount: task.stars + (v.bonus ? 1 : 0),
           kind: 'task',
           title: task.title,
-          note: '家长代完成',
+          note: v.bonus ? '家长代完成，含额外奖励 1 星' : '家长代完成',
           date: task.date,
           actor: req.user.id,
           submission: row.id,
@@ -365,26 +371,30 @@ export function createApp(config = {}) {
     );
     if (!s) fail(404, '提交不存在');
     child(req, s.child_id);
-    const v = z.object({ approve: z.boolean(), note: description }).parse(req.body);
+    const v = z
+      .object({ approve: z.boolean(), note: description, bonus: z.boolean().default(false) })
+      .parse(req.body);
+    if (v.bonus && !v.approve) fail(400, '不能发放额外奖励');
     tx(db, () => {
       const current = get(db, 'SELECT status FROM submissions WHERE id=?', s.id);
       if (current.status !== 'pending') fail(409, '这条任务已经处理过了');
       run(
         db,
-        'UPDATE submissions SET status=?,review_note=?,reviewed_by=?,reviewed_at=? WHERE id=?',
+        'UPDATE submissions SET status=?,review_note=?,reviewed_by=?,reviewed_at=?,bonus=? WHERE id=?',
         v.approve ? 'approved' : 'rejected',
         v.note,
         req.user.id,
         now(),
+        Number(v.bonus),
         s.id,
       );
       if (v.approve)
         postLedger({
           childId: s.child_id,
-          amount: s.stars,
+          amount: s.stars + (v.bonus ? 1 : 0),
           kind: 'task',
           title: s.title,
-          note: s.note,
+          note: v.bonus ? [s.note, '含额外奖励 1 星'].filter(Boolean).join('；') : s.note,
           date: s.date,
           actor: req.user.id,
           submission: s.id,
