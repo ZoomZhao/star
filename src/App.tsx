@@ -304,7 +304,7 @@ export default function App() {
     [sound, setSound] = useState(localStorage.getItem('star-sound') === 'true'),
     [online, setOnline] = useState(navigator.onLine),
     [cheer, setCheer] = useState(''),
-    [subject, setSubject] = useState('all'),
+    [subject, setSubject] = useState('chinese'),
     [taskPage, setTaskPage] = useState(0),
     [skin, setSkin] = useState(localStorage.getItem('star-skin') || 'dino'),
     [skinOpen, setSkinOpen] = useState(false);
@@ -313,11 +313,9 @@ export default function App() {
     localStorage.setItem('star-skin', skin);
   }, [skin]);
   useEffect(() => setTaskPage(0), [date, subject, childId]);
-  const filteredTasks = data?.tasks.filter((t) => subject === 'all' || t.subject === subject) || [];
+  const filteredTasks = data?.tasks.filter((t) => t.subject === subject) || [];
   const visiblePage = Math.min(taskPage, Math.max(0, Math.ceil(filteredTasks.length / 4) - 1));
-  const subjectPicker = (
-    <SubjectPicker options={{ all: '全部', ...subjects }} value={subject} onChange={setSubject} />
-  );
+  const subjectPicker = <SubjectPicker options={subjects} value={subject} onChange={setSubject} />;
   const working = useRef(false),
     lastBalance = useRef<number | null>(null),
     observedToday = useRef(currentDate()),
@@ -1255,7 +1253,7 @@ export default function App() {
                 {subjectPicker}
                 <div className="rules-grid">
                   {data.rules
-                    .filter((r) => subject === 'all' || r.subject === subject)
+                    .filter((r) => r.subject === subject)
                     .map((r) => (
                       <article className="card rule-card" key={r.id}>
                         <div className="list-row">

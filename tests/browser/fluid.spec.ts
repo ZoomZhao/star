@@ -215,7 +215,7 @@ test('subject selection exposes its state without shifting controls across skins
 }) => {
   await login(page);
   const group = page.getByRole('group', { name: '科目分类', exact: true });
-  const labels = ['全部', '语文', '数学', '英语', '体育', '其他'];
+  const labels = ['语文', '数学', '英语', '体育', '其他'];
 
   for (const { width, height, skin } of [
     { width: 390, height: 844, skin: 'dino' },
@@ -229,7 +229,7 @@ test('subject selection exposes its state without shifting controls across skins
     await expect(page.locator('html')).toHaveAttribute('data-skin', skin);
     await expect(group.getByRole('button')).toHaveCount(labels.length);
     const before = await buttonRects(group);
-    for (const selected of ['英语', '数学', '全部']) {
+    for (const selected of ['英语', '数学', '语文']) {
       await group.getByRole('button', { name: selected, exact: true }).click();
       for (const label of labels)
         await expect(group.getByRole('button', { name: label, exact: true })).toHaveAttribute(

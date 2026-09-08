@@ -44,7 +44,7 @@ public class MainActivity extends AppCompatActivity {
   private String childId = "",
     date = today(),
     page = "today",
-    subject = "all",
+    subject = "chinese",
     rewardFilter = "all",
     error = "";
   private int taskScrollY = 0,
@@ -150,6 +150,7 @@ public class MainActivity extends AppCompatActivity {
       date = b.getString("date", date);
       page = b.getString("page", page);
       subject = b.getString("subject", subject);
+      if (subject.equals("all")) subject = "chinese";
       taskScrollY = b.getInt("taskScrollY");
       childId = b.getString("childId", "");
     }
@@ -844,7 +845,7 @@ public class MainActivity extends AppCompatActivity {
     JSONArray selected = new JSONArray();
     for (int i = 0; i < array(data, "tasks").length(); i++) {
       JSONObject task = obj(array(data, "tasks"), i);
-      if (subject.equals("all") || task.optString("subject", "other").equals(subject)) selected.put(
+      if (task.optString("subject", "other").equals(subject)) selected.put(
         task
       );
     }
@@ -951,8 +952,7 @@ public class MainActivity extends AppCompatActivity {
   private void subjectStrip(LinearLayout box) {
     LinearLayout row = ui.row();
     row.setTag("subject-strip");
-    String[] keys = { "all", "chinese", "math", "english", "sports", "other" },
-      labels = { "全部", "语文", "数学", "英语", "体育", "其他" };
+    String[] keys = SUBJECTS, labels = LABELS;
     for (int i = 0; i < keys.length; i++) {
       String key = keys[i];
       TextView b = ui.button(labels[i], subject.equals(key), () -> {
@@ -963,7 +963,7 @@ public class MainActivity extends AppCompatActivity {
       b.setTextSize(14);
       b.setPadding(0, ui.dp(6), 0, ui.dp(6));
       row.addView(b, new LinearLayout.LayoutParams(0, ui.dp(48), 1));
-      if (i < 5) ui.gap(row, 5);
+      if (i < keys.length - 1) ui.gap(row, 5);
     }
     ui.add(box, row, 54);
   }
@@ -1268,7 +1268,7 @@ public class MainActivity extends AppCompatActivity {
     childId = "";
     date = today();
     page = "today";
-    subject = "all";
+    subject = "chinese";
     taskScrollY = 0;
     error = "";
     closeDialog();
@@ -1800,7 +1800,7 @@ public class MainActivity extends AppCompatActivity {
     list.addView(ui.button("从预制模板开始", false, this::templatePicker));
     ui.gap(list, 14);
     for (int si = 0; si < 5; si++) {
-      if (!subject.equals("all") && !subject.equals(SUBJECTS[si])) continue;
+      if (!subject.equals(SUBJECTS[si])) continue;
       LinearLayout heading = ui.row();
       heading.addView(new ArtView(this, "subjects/" + SUBJECTS[si] + ".webp"), ui.lp(66, 66));
       ui.gap(heading, 12);
@@ -1868,11 +1868,7 @@ public class MainActivity extends AppCompatActivity {
       "一级科目",
       LABELS,
       subjectIndex(
-        initial == null
-          ? subject.equals("all")
-            ? "chinese"
-            : subject
-          : initial.optString("subject")
+        initial == null ? subject : initial.optString("subject")
       )
     );
     EditText title = ui.input(

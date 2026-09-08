@@ -27,13 +27,19 @@ test('tablet child submits, parent approves, wallet and reward request complete'
   const title = '测试阅读 ' + Date.now();
   const made = await request.post(`http://127.0.0.1:3002/api/children/${child.user.id}/rules`, {
     headers: { Authorization: 'Bearer ' + parent.token },
-    data: { title, description: '读一小段', stars: 2, daily_limit: 2, schedule: 'daily' },
+    data: {
+      title,
+      subject: 'chinese',
+      description: '读一小段',
+      stars: 2,
+      daily_limit: 2,
+      schedule: 'daily',
+    },
   });
   expect(made.ok()).toBeTruthy();
   await page.reload();
   const card = page.locator('.task-card').filter({ hasText: title });
-  for (let i = 0; i < 10 && !(await card.count()); i++)
-    await page.getByRole('button', { name: '下一页', exact: true }).click();
+  await expect(card).toBeVisible();
   await card.getByRole('button', { name: '我完成啦' }).click();
   await page.getByRole('textbox', { name: '想告诉家长的话（可选）' }).fill('今天我读了一个故事');
   await page.getByRole('button', { name: '我完成了 1 次，请家长确认' }).click();
@@ -145,7 +151,7 @@ test('remembered login, subject presets, skins, and landscape main actions stay 
     await page.getByRole('button', { name: label, exact: true }).click();
     await expect(page.locator('.subject-art').first()).toHaveAttribute('alt', label);
   }
-  await page.getByRole('button', { name: '全部', exact: true }).click();
+  await page.getByRole('button', { name: '语文', exact: true }).click();
   for (const button of await page
     .locator('.task-card button.primary,.task-pagination button')
     .all()) {
@@ -324,11 +330,13 @@ test('family-load failure offers a working retry instead of reporting an unalloc
 test('parent task order persists after reload within its subject', async ({ page }) => {
   await login(page, 'parent');
   await page.getByRole('button', { name: '任务规则', exact: true }).click();
+  await page.getByRole('button', { name: '体育', exact: true }).click();
   const cards = page.locator('.rule-card').filter({ hasText: '体育 ·' });
   const moving = await cards.nth(1).locator('h3').innerText();
   await cards.nth(1).getByRole('button', { name: '上移', exact: true }).click();
   await expect(cards.first().locator('h3')).toHaveText(moving);
   await page.reload();
   await page.getByRole('button', { name: '任务规则', exact: true }).click();
+  await page.getByRole('button', { name: '体育', exact: true }).click();
   await expect(cards.first().locator('h3')).toHaveText(moving);
 });
