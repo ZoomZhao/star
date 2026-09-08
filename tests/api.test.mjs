@@ -762,3 +762,42 @@ test('homework seeds once per subject and all tasks support optional parent bonu
     200,
   );
 });
+
+test('adding homework preserves customized rule versions and daily task snapshots', async (t) => {
+  const s = await setup(t);
+  const d = await s.dashboard();
+  const task = d.tasks.find((t) => t.title === '读英文绘本');
+  const rule = d.rules.find((r) => r.rule_key === task.rule_key);
+  assert.equal(
+    (await s.call(`/api/tasks/${task.id}`, 'PATCH', { ...task, daily_limit: 7 }, s.parent.token))
+      .status,
+    200,
+  );
+  assert.equal(
+    (
+      await s.call(
+        `/api/rules/${rule.rule_key}`,
+        'PATCH',
+        { ...rule, daily_limit: 10, enabled: true },
+        s.parent.token,
+      )
+    ).status,
+    200,
+  );
+  const before = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  const presets = (await s.call('/api/task-templates', 'GET', null, s.parent.token)).data;
+  seedTemplates(
+    s.db,
+    s.child.user.id,
+    presets.filter((t) => t.title === '课内作业'),
+  );
+  const after = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  assert.deepEqual(after.data.rules, before.data.rules);
+  assert.deepEqual(after.data.tasks, before.data.tasks);
+  assert.equal((await s.dashboard()).tasks.find((t) => t.id === task.id).daily_limit, 7);
+  assert.equal(
+    (await s.dashboard(addDays(today(), 1))).tasks.find((t) => t.rule_key === rule.rule_key)
+      .daily_limit,
+    10,
+  );
+});
