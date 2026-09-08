@@ -460,7 +460,7 @@ export default function App() {
       }
       refresh().catch(() => {});
     };
-    const t = setInterval(tick, 60000);
+    const t = setInterval(tick, 20000);
     window.addEventListener('focus', tick);
     window.addEventListener('online', tick);
     document.addEventListener('visibilitychange', tick);
@@ -1857,14 +1857,16 @@ function TaskDetail({
               submit(note, unitStars, quantity);
             }}
           >
-            <Field label="想告诉家长的话（可选）">
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                maxLength={1000}
-                placeholder="例如：今天我读了两页绘本！"
-              />
-            </Field>
+            {parent && (
+              <Field label="想告诉家长的话（可选）">
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  maxLength={1000}
+                  placeholder="例如：今天我读了两页绘本！"
+                />
+              </Field>
+            )}
             {parent && (
               <AwardFields
                 stars={unitStars}

@@ -55,7 +55,7 @@ npm run android:build
 npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-产物为 `artifacts/star-explorer-native.apk`（0.2.11-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
+产物为 `artifacts/star-explorer-native.apk`（0.2.12-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
 
 发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 
@@ -106,7 +106,8 @@ node scripts/ecs-command.mjs 'journalctl -u star -n 50 --no-pager'
 
 ## 数据与规则
 
-- 网页和平板在前台每 60 秒刷新任务、审批和星星数据；回到前台立即刷新。后台暂停定时刷新，编辑弹窗或提交操作期间暂缓自动刷新，网页正在输入时也暂缓。本版本使用轮询，不提供后台推送通知。
+- 网页和平板在前台每 20 秒刷新任务、审批和星星数据；回到前台立即刷新。后台暂停定时刷新，编辑弹窗或提交操作期间暂缓自动刷新，网页正在输入时也暂缓。本版本使用轮询，不提供后台推送通知。
+- Android 账号设置支持“锁定当前方向”，重启后保留，关闭后跟随系统旋转设置。小朋友提交任务无需填写留言，弹窗确认按钮与“我完成啦”保持同款样式，关闭按钮位于右上角。
 
 - 家长审批和代完成可输入每次星星（1–101）与本次完成次数（1–20，不能超过每日剩余额度），实发星星为两者乘积。孩子仍按一次提交，待确认次数同样占用额度。旧版加星、少发请求继续兼容。
 - 家长可在任务规则中按科目上移、下移任务，立即同步到孩子端。排序单独存储并随备份恢复，不改变规则版本、任务快照或账本。

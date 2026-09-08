@@ -41,7 +41,7 @@ test('tablet child submits, parent approves, wallet and reward request complete'
   const card = page.locator('.task-card').filter({ hasText: title });
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: '我完成啦' }).click();
-  await page.getByRole('textbox', { name: '想告诉家长的话（可选）' }).fill('今天我读了一个故事');
+  await expect(page.getByRole('textbox', { name: '想告诉家长的话（可选）' })).toHaveCount(0);
   await page.getByRole('button', { name: '我完成了 1 次，请家长确认' }).click();
   await expect(page.getByRole('heading', { name: '太棒啦，任务已提交！' }).first()).toBeVisible();
   await page.getByRole('button', { name: '继续我的探险' }).click();
@@ -51,7 +51,7 @@ test('tablet child submits, parent approves, wallet and reward request complete'
   await page.getByRole('button', { name: '家长', exact: true }).click();
   await page.getByRole('button', { name: /^待确认/ }).click();
   const review = page.locator('.review-card').filter({ hasText: title });
-  await expect(review).toContainText('今天我读了一个故事');
+  await expect(review).toBeVisible();
   await review.getByLabel('每次发放星星').fill('3');
   await review.getByLabel('本次完成次数').fill('2');
   await review.getByRole('button', { name: '确认 2 次，发放 6 星' }).click();
@@ -341,7 +341,7 @@ test('parent task order persists after reload within its subject', async ({ page
   await expect(cards.first().locator('h3')).toHaveText(moving);
 });
 
-test('foreground polling refreshes after one minute, pauses hidden, and refreshes on return', async ({
+test('foreground polling refreshes after 20 seconds, pauses hidden, and refreshes on return', async ({
   page,
   request,
 }) => {
@@ -354,7 +354,7 @@ test('foreground polling refreshes after one minute, pauses hidden, and refreshe
   await login(page);
   await expect(page.locator('.task-card').first()).toBeVisible();
   const initial = reads;
-  await page.clock.fastForward(59000);
+  await page.clock.fastForward(19000);
   expect(reads).toBe(initial);
   const next = page.waitForResponse((r) => r.url().includes('/dashboard?'));
   await page.clock.fastForward(2000);

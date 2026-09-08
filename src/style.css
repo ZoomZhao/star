@@ -1380,24 +1380,39 @@ hr {
   backdrop-filter: blur(5px);
 }
 .modal-head {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 22px;
+  min-height: 44px;
+  padding-right: 56px;
 }
 .modal-head h2 {
   font-size: 21px;
 }
 .modal-head .icon-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
   width: 44px;
   height: 44px;
+  color: var(--deep);
+  border-color: var(--green);
 }
 .modal-head .icon-btn svg {
   width: 18px;
 }
 .modal-body {
   min-width: 0;
+}
+.app .modal .primary {
+  min-height: 54px;
+  padding: 14px 20px;
+  font-size: 16px;
+  font-weight: 800;
+  white-space: normal;
 }
 .field {
   display: flex;
@@ -3922,12 +3937,7 @@ hr {
 }
 :is([data-skin='space'], [data-skin='ocean'], [data-skin='forest'])
   .app
-  :is(
-    .secondary,
-    .navigation button.active,
-    .balance-pill,
-    .daily-summary
-  ) {
+  :is(.secondary, .navigation button.active, .balance-pill, .daily-summary) {
   background: var(--skin-soft);
   color: var(--deep);
   border-color: var(--border);

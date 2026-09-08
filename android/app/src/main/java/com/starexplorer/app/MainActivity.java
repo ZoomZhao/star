@@ -5,6 +5,7 @@ import static com.starexplorer.app.nativeui.StarApi.json;
 import android.app.DatePickerDialog;
 import android.content.*;
 import android.content.res.Configuration;
+import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.*;
@@ -61,7 +62,7 @@ public class MainActivity extends AppCompatActivity {
   private final Runnable poll = new Runnable() {
     public void run() {
       if (resumed && user != null && !busy && activeDialog == null) refresh(false);
-      handler.postDelayed(this, 60000);
+      handler.postDelayed(this, 20000);
     }
   };
 
@@ -140,6 +141,7 @@ public class MainActivity extends AppCompatActivity {
       getWindow(),
       getWindow().getDecorView()
     ).setAppearanceLightNavigationBars(true);
+    setRequestedOrientation(getPreferences(0).getInt("lockedOrientation", ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED));
     skin = Skin.from(getPreferences(0).getString("skin", "dino"));
     String base = BuildConfig.API_BASE_URL;
     String test = getIntent().getStringExtra("test_api");
@@ -207,7 +209,7 @@ public class MainActivity extends AppCompatActivity {
     super.onResume();
     resumed = true;
     handler.removeCallbacks(poll);
-    handler.postDelayed(poll, 60000);
+    handler.postDelayed(poll, 20000);
     if (user != null && !busy && activeDialog == null) refresh(false);
   }
 
@@ -235,7 +237,7 @@ public class MainActivity extends AppCompatActivity {
     CharSequence actionTitle = action == null ? null : action.getText();
     if (operationDialog != null) {
       operationDialog.setCancelable(false);
-      operationDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
+      operationDialog.getWindow().getDecorView().findViewWithTag("dialog-close").setEnabled(false);
     }
     if (action != null) {
       action.setEnabled(false);
@@ -256,7 +258,7 @@ public class MainActivity extends AppCompatActivity {
         if (mutating) busy = false;
         if (operationDialog != null && operationDialog.isShowing()) {
           operationDialog.setCancelable(true);
-          operationDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);
+          operationDialog.getWindow().getDecorView().findViewWithTag("dialog-close").setEnabled(true);
         }
         if (action != null) {
           action.setEnabled(true);
@@ -1023,10 +1025,20 @@ public class MainActivity extends AppCompatActivity {
   private AlertDialog dialog(String title, LinearLayout content, String action, Runnable onAction) {
     closeDialog();
     ScrollView scroll = ui.scroll(content);
+    LinearLayout heading = ui.row();
+    heading.setGravity(Gravity.TOP);
+    ui.pad(heading, 16);
+    TextView titleView = ui.text(title, 21, true);
+    titleView.setPadding(0, ui.dp(12), ui.dp(12), 0);
+    heading.addView(titleView, new LinearLayout.LayoutParams(0, -2, 1));
+    TextView close = ui.button("×", false, () -> { if (!busy) closeDialog(); });
+    close.setTextSize(26);
+    close.setContentDescription("关闭");
+    close.setTag("dialog-close");
+    heading.addView(close, ui.lp(48, 48));
     AlertDialog.Builder b = new AlertDialog.Builder(this)
-      .setTitle(title)
-      .setView(scroll)
-      .setNegativeButton("关闭", (d, w) -> {});
+      .setCustomTitle(heading)
+      .setView(scroll);
     if (action != null) b.setPositiveButton(action, null);
     AlertDialog d = b.create();
     activeDialog = d;
@@ -1035,9 +1047,20 @@ public class MainActivity extends AppCompatActivity {
     });
     d.setOnShowListener(v -> {
       resizeDialog(d);
-      if (action != null) d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
-        if (!busy) onAction.run();
-      });
+      if (action != null) {
+        android.widget.Button confirm = d.getButton(AlertDialog.BUTTON_POSITIVE);
+        TextView style = ui.button(action, true, () -> {});
+        confirm.setBackground(style.getBackground());
+        confirm.setTextColor(style.getTextColors());
+        confirm.setTypeface(style.getTypeface());
+        confirm.setTextSize(16);
+        confirm.setAllCaps(false);
+        confirm.setMinHeight(ui.dp(52));
+        confirm.setPadding(ui.dp(24), ui.dp(12), ui.dp(24), ui.dp(12));
+        confirm.setOnClickListener(x -> {
+          if (!busy) onAction.run();
+        });
+      }
     });
     d.show();
     return d;
@@ -1118,12 +1141,12 @@ public class MainActivity extends AppCompatActivity {
     );
     EditText[] award = parent() ? awardFields(f, t.optInt("stars"), t.optInt("daily_limit") - t.optInt("approved") - t.optInt("pending")) : null;
     ui.line(f, "家长可调整本次每次星星和完成次数");
-    EditText note = ui.input(
+    EditText note = parent() ? ui.input(
       f,
       "想告诉家长的话（选填）",
       "",
       InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-    );
+    ) : null;
     for (int i = 0; i < array(t, "submissions").length(); i++) {
       JSONObject s = obj(array(t, "submissions"), i);
       ui.line(
@@ -1150,7 +1173,7 @@ public class MainActivity extends AppCompatActivity {
         mutation(
           "/api/tasks/" + t.optString("id") + "/submit",
           "POST",
-          awardBody(json("note", note.getText().toString()), award),
+          awardBody(json("note", note == null ? "" : note.getText().toString()), award),
           true,
           parent() ? "已发放星星 ★" : "已提交！等家长确认后就能收到星星啦"
         )
@@ -1190,6 +1213,27 @@ public class MainActivity extends AppCompatActivity {
     LinearLayout f = form();
     ui.line(f, user.optString("name") + " · " + user.optString("username"));
     ui.line(f, "登录状态已安全保存，关闭应用或重启平板后会自动进入。");
+    androidx.appcompat.widget.SwitchCompat orientationLock = new androidx.appcompat.widget.SwitchCompat(this);
+    orientationLock.setText("锁定当前方向");
+    orientationLock.setTextColor(skin.ink);
+    orientationLock.setMinHeight(ui.dp(48));
+    orientationLock.setChecked(getPreferences(0).getInt("lockedOrientation", ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+    orientationLock.setOnCheckedChangeListener((button, checked) -> {
+      int orientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+      if (checked) {
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        boolean reverse = rotation == Surface.ROTATION_180 ||
+          rotation == (landscape ? Surface.ROTATION_270 : Surface.ROTATION_90);
+        orientation = landscape
+          ? (reverse ? ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+          : (reverse ? ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+      }
+      getPreferences(0).edit().putInt("lockedOrientation", orientation).apply();
+      setRequestedOrientation(orientation);
+    });
+    f.addView(orientationLock);
+    ui.line(f, "开启后保持当前横屏或竖屏，关闭后跟随系统旋转设置。");
     f.addView(ui.button("更换皮肤", false, this::skins));
     ui.gap(f, 12);
     f.addView(
