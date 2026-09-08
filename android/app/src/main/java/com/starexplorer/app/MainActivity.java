@@ -1068,7 +1068,7 @@ public class MainActivity extends AppCompatActivity {
     d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
     d.getWindow().setLayout(
       Math.min(ui.dp(560), Math.max(ui.dp(280), contentW - ui.dp(32))),
-      Math.min(ui.dp(680), Math.max(ui.dp(260), contentH - ui.dp(32)))
+      WindowManager.LayoutParams.WRAP_CONTENT
     );
   }
 

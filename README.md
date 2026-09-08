@@ -54,7 +54,7 @@ npm run android:build
 npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-产物为 `artifacts/star-explorer-native.apk`（0.2.4-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
+产物为 `artifacts/star-explorer-native.apk`（0.2.5-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
 
 发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 
