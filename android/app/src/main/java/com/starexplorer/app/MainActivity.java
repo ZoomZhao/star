@@ -1759,6 +1759,19 @@ public class MainActivity extends AppCompatActivity {
     return body;
   }
 
+  private void reviewDetails(LinearLayout container, JSONObject review, boolean task) {
+    ui.line(container, (task ? subjectName(review) + " · " : "心愿 · ") + review.optString("title"));
+    if (task) {
+      ui.line(container, "任务日期：" + review.optString("date") + " · 每次 " + review.optInt("stars") + " 星 · 每日上限 " + review.optInt("daily_limit") + " 次");
+      String description = review.optString("description").trim();
+      ui.line(container, "任务说明：" + (description.isEmpty() ? "未填写任务说明" : description));
+    } else {
+      ui.line(container, "消耗 " + review.optInt("cost") + " 星");
+    }
+    String note = review.optString("note").trim();
+    if (!note.isEmpty()) ui.line(container, "提交备注：" + note);
+  }
+
   private void reviews(LinearLayout main) {
     title(main, "看见孩子的每一次努力", null);
     LinearLayout list = ui.col();
@@ -1771,20 +1784,13 @@ public class MainActivity extends AppCompatActivity {
         n++;
         boolean task = kind.equals("reviews");
         LinearLayout c = ui.card();
-        ui.line(c, (task ? "任务 · " : "心愿 · ") + r.optString("title"));
-        ui.line(
-          c,
-          (task ? "获得 " + r.optInt("stars") : "消耗 " + r.optInt("cost")) +
-            " 星  " +
-            r.optString("date")
-        );
-        ui.line(c, r.optString("note", r.optString("description")));
+        reviewDetails(c, r, task);
         LinearLayout actions = ui.row();
         for (boolean approve : new boolean[] { false, true }) {
           actions.addView(
             ui.button(approve ? "通过" : "退回", approve, () -> {
               LinearLayout f = form();
-              ui.line(f, r.optString("title"));
+              reviewDetails(f, r, task);
               EditText note = ui.input(
                 f,
                 "给孩子的话（选填）",

@@ -404,3 +404,54 @@ test('all five skins have usable artwork and preserve the chosen theme on reload
     await expect(page.locator('html')).toHaveAttribute('data-skin', key);
   }
 });
+
+test('parent reviews distinguish same-title subjects and keep descriptions beside notes', async ({
+  page,
+  request,
+}) => {
+  const parent = await (
+    await request.post('http://127.0.0.1:3002/api/login', {
+      data: { username: 'parent', password: 'parent123' },
+    })
+  ).json();
+  const child = await (
+    await request.post('http://127.0.0.1:3002/api/login', {
+      data: { username: 'child', password: 'child123' },
+    })
+  ).json();
+  const headers = { Authorization: 'Bearer ' + parent.token };
+  const path = `http://127.0.0.1:3002/api/children/${child.user.id}`;
+  const title = '同名作业 ' + randomUUID();
+  for (const [subject, description] of [
+    ['chinese', '朗读课文第二段\n圈出三个生字'],
+    ['math', '完成第八页的口算题'],
+  ]) {
+    const created = await request.post(path + '/rules', {
+      headers,
+      data: { title, subject, description, stars: 2, daily_limit: 10, schedule: 'daily' },
+    });
+    expect(created.ok()).toBeTruthy();
+  }
+  const dashboard = await (await request.get(path + '/dashboard', { headers })).json();
+  for (const task of dashboard.tasks.filter((task: any) => task.title === title)) {
+    const submitted = await request.post(`http://127.0.0.1:3002/api/tasks/${task.id}/submit`, {
+      headers: { Authorization: 'Bearer ' + child.token, 'Idempotency-Key': randomUUID() },
+      data: { note: task.subject === 'chinese' ? '已读完，请检查' : '' },
+    });
+    expect(submitted.ok()).toBeTruthy();
+  }
+  await login(page, 'parent');
+  await page.getByRole('button', { name: /^待确认/ }).click();
+  const chinese = page
+    .locator('.review-card')
+    .filter({ has: page.getByRole('heading', { name: '语文 · ' + title, exact: true }) });
+  const math = page
+    .locator('.review-card')
+    .filter({ has: page.getByRole('heading', { name: '数学 · ' + title, exact: true }) });
+  await expect(chinese).toContainText('任务说明：朗读课文第二段');
+  await expect(chinese).toContainText('圈出三个生字');
+  await expect(chinese).toContainText('提交备注：已读完，请检查');
+  await expect(chinese).toContainText('每日上限 10 次');
+  await expect(math).toContainText('任务说明：完成第八页的口算题');
+  await expect(math).not.toContainText('提交备注：');
+});

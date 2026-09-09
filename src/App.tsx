@@ -1204,13 +1204,18 @@ export default function App() {
                       data.reviews.map((s) => (
                         <article className="review-card" key={s.id}>
                           <div className="list-row">
-                            <Tile icon={s.icon} />
+                            <Tile icon={s.icon} subject={s.subject} />
                             <div>
-                              <h4>{s.title}</h4>
+                              <h4>
+                                {subjects[s.subject] || '其他'} · {s.title}
+                              </h4>
                               <p>
-                                {s.date} · 每次 {s.stars} 星
+                                任务日期：{s.date} · 每次 {s.stars} 星 · 每日上限 {s.daily_limit} 次
                               </p>
-                              <p>{s.note || s.description}</p>
+                              <p className="review-detail">
+                                任务说明：{s.description || '未填写任务说明'}
+                              </p>
+                              {s.note && <p className="review-detail">提交备注：{s.note}</p>}
                             </div>
                           </div>
                           <ReviewAward

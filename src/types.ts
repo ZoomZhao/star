@@ -20,6 +20,7 @@ export type Submission = {
   review_note: string;
   created_at: string;
   title: string;
+  subject: Subject;
   stars: number;
   icon: string;
   date: string;

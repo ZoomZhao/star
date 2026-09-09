@@ -1295,6 +1295,10 @@ hr {
 .review-card:last-child {
   border-bottom: 0;
 }
+.review-detail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .review-actions {
   display: flex;
   align-items: center;
