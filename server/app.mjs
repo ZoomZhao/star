@@ -105,6 +105,7 @@ export function createApp(config = {}) {
       limit: 30,
       standardHeaders: 'draft-8',
       legacyHeaders: false,
+      skipSuccessfulRequests: true,
       message: { error: '尝试过于频繁，请稍后再试' },
     }),
     (req, res) => {

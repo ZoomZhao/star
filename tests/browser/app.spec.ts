@@ -52,9 +52,19 @@ test('tablet child submits, parent approves, wallet and reward request complete'
   await page.getByRole('button', { name: /^待确认/ }).click();
   const review = page.locator('.review-card').filter({ hasText: title });
   await expect(review).toBeVisible();
-  await review.getByLabel('每次发放星星').fill('3');
-  await review.getByLabel('本次完成次数').fill('2');
-  await review.getByRole('button', { name: '确认 2 次，发放 6 星' }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBeTruthy();
+  await review.getByRole('button', { name: '退回', exact: true }).click();
+  await expect(review).toContainText('确定退回这次提交吗？');
+  await review.getByRole('button', { name: '先不退回', exact: true }).click();
+  await review.getByRole('button', { name: '每次发放 3 颗星星' }).click();
+  await review.getByRole('button', { name: '本次完成 2 次' }).click();
+  await expect(review.locator('.award-total')).toContainText('本次实发');
+  await expect(review.locator('.award-total')).toContainText('6');
+  await expect(review.locator('input[type="number"]')).toHaveCount(0);
+  await review.getByRole('button', { name: '确认并发放 6 星' }).click();
   await expect(review).toHaveCount(0);
   await page.getByRole('button', { name: '星星口袋', exact: true }).click();
   await expect(page.locator('.ledger-row').filter({ hasText: title })).toContainText('+6');
@@ -448,10 +458,13 @@ test('parent reviews distinguish same-title subjects and keep descriptions besid
   const math = page
     .locator('.review-card')
     .filter({ has: page.getByRole('heading', { name: '数学 · ' + title, exact: true }) });
-  await expect(chinese).toContainText('任务说明：朗读课文第二段');
+  await expect(chinese).toContainText('任务要求');
+  await expect(chinese).toContainText('朗读课文第二段');
   await expect(chinese).toContainText('圈出三个生字');
-  await expect(chinese).toContainText('提交备注：已读完，请检查');
+  await expect(chinese).toContainText('孩子说');
+  await expect(chinese).toContainText('已读完，请检查');
   await expect(chinese).toContainText('每日上限 10 次');
-  await expect(math).toContainText('任务说明：完成第八页的口算题');
-  await expect(math).not.toContainText('提交备注：');
+  await expect(math).toContainText('任务要求');
+  await expect(math).toContainText('完成第八页的口算题');
+  await expect(math).not.toContainText('孩子说');
 });

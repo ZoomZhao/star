@@ -1195,6 +1195,17 @@ export default function App() {
                   title="看看孩子的努力"
                   icon={<ShieldCheck />}
                 />
+                <div className="review-summary">
+                  <div>
+                    <strong>{data.reviews.length}</strong>
+                    <span>项任务待确认</span>
+                  </div>
+                  <div>
+                    <strong>{data.redemptions.filter((r) => r.status === 'pending').length}</strong>
+                    <span>个兑换心愿</span>
+                  </div>
+                  <p>先看完成情况，再点选星星和次数；确认后会立即记入星星账本。</p>
+                </div>
                 <div className="review-layout">
                   <div className="card">
                     <h3>
@@ -1203,20 +1214,36 @@ export default function App() {
                     {data.reviews.length ? (
                       data.reviews.map((s) => (
                         <article className="review-card" key={s.id}>
-                          <div className="list-row">
+                          <div className="list-row review-card-head">
                             <Tile icon={s.icon} subject={s.subject} />
                             <div>
                               <h4>
                                 {subjects[s.subject] || '其他'} · {s.title}
                               </h4>
-                              <p>
-                                任务日期：{s.date} · 每次 {s.stars} 星 · 每日上限 {s.daily_limit} 次
-                              </p>
-                              <p className="review-detail">
-                                任务说明：{s.description || '未填写任务说明'}
-                              </p>
-                              {s.note && <p className="review-detail">提交备注：{s.note}</p>}
+                              <div className="review-meta">
+                                <span>
+                                  <CalendarDays size={14} /> {s.date}
+                                </span>
+                                <span>
+                                  <StarIcon size={14} /> 基础 {s.stars} 星
+                                </span>
+                                <span>
+                                  <Timer size={14} /> 每日上限 {s.daily_limit} 次
+                                </span>
+                              </div>
                             </div>
+                          </div>
+                          <div className="review-context">
+                            <div>
+                              <strong>任务要求</strong>
+                              <p className="review-detail">{s.description || '未填写任务说明'}</p>
+                            </div>
+                            {s.note && (
+                              <div className="child-note">
+                                <strong>孩子说</strong>
+                                <p className="review-detail">{s.note}</p>
+                              </div>
+                            )}
                           </div>
                           <ReviewAward
                             stars={s.stars}
@@ -1249,6 +1276,11 @@ export default function App() {
                               <p>
                                 兑换消耗 {r.cost} 星 · 当前余额 {data.wallet.balance}
                               </p>
+                              <p className="review-detail">
+                                {data.wallet.balance >= r.cost
+                                  ? `确认后余额 ${data.wallet.balance - r.cost} 星`
+                                  : `还差 ${r.cost - data.wallet.balance} 星，暂时无法兑换`}
+                              </p>
                             </div>
                           </div>
                           <div className="review-actions">
@@ -1261,7 +1293,7 @@ export default function App() {
                             </Button>
                             <Button
                               className="primary"
-                              disabled={busy}
+                              disabled={busy || data.wallet.balance < r.cost}
                               onClick={() => review(r.id, true, 'redemptions')}
                             >
                               确认兑换
@@ -1737,32 +1769,90 @@ function AwardFields({
   setStars: (n: number) => void;
   setQuantity: (n: number) => void;
 }) {
+  const commonStarChoices = Array.from({ length: 5 }, (_, index) => index + 1);
+  const quantityChoices = Array.from(
+    new Set([
+      ...Array.from({ length: Math.min(limit, 10) }, (_, index) => index + 1),
+      ...(limit > 10 ? [limit] : []),
+    ]),
+  );
   return (
-    <>
-      <div className="form-row">
-        <Field label="每次发放星星">
-          <input
-            type="number"
-            min={1}
-            max={101}
-            required
-            value={stars}
-            onChange={(e) => setStars(Number(e.target.value))}
-          />
-        </Field>
-        <Field label="本次完成次数">
-          <input
-            type="number"
-            min={1}
-            max={limit}
-            required
-            value={quantity}
-            onChange={(e) => setQuantity(Number(e.target.value))}
-          />
-        </Field>
+    <fieldset className="award-panel">
+      <legend>本次奖励</legend>
+      <div className="award-picker">
+        <div className="award-picker-head">
+          <span>每次发放</span>
+          <strong>
+            <StarIcon size={18} /> {stars} 星
+          </strong>
+        </div>
+        <div className="star-choice" role="group" aria-label="每次发放星星">
+          {commonStarChoices.map((value) => (
+            <Button
+              type="button"
+              key={value}
+              className={stars === value ? 'selected' : ''}
+              aria-label={`每次发放 ${value} 颗星星`}
+              aria-pressed={stars === value}
+              onClick={() => setStars(value)}
+            >
+              <StarIcon size={27} filled={stars >= value} />
+              <span>{value}</span>
+            </Button>
+          ))}
+        </div>
+        <div className="number-stepper" aria-label="调整更多星星">
+          <Button
+            type="button"
+            aria-label="减少一颗星星"
+            disabled={stars <= 1}
+            onClick={() => setStars(Math.max(1, stars - 1))}
+          >
+            −
+          </Button>
+          <span>{stars > 5 ? `当前 ${stars} 星` : '需要更多？'}</span>
+          <Button
+            type="button"
+            aria-label="增加一颗星星"
+            disabled={stars >= 101}
+            onClick={() => setStars(Math.min(101, stars + 1))}
+          >
+            +
+          </Button>
+        </div>
       </div>
-      <p>合计发放 {stars * quantity} 颗星星</p>
-    </>
+      <div className="award-picker">
+        <div className="award-picker-head">
+          <span>完成次数</span>
+          <strong>{quantity} 次</strong>
+        </div>
+        <div className="quantity-choice" role="group" aria-label="本次完成次数">
+          {quantityChoices.map((value) => (
+            <Button
+              type="button"
+              key={value}
+              className={quantity === value ? 'selected' : ''}
+              aria-label={`本次完成 ${value} 次`}
+              aria-pressed={quantity === value}
+              onClick={() => setQuantity(value)}
+            >
+              {value === limit && limit > 10 ? `最多 ${value}` : value}
+            </Button>
+          ))}
+        </div>
+      </div>
+      <div className="award-total" aria-live="polite" aria-atomic="true">
+        <div>
+          <span>本次实发</span>
+          <small>
+            {quantity} 次 × 每次 {stars} 星
+          </small>
+        </div>
+        <strong>
+          {stars * quantity} <StarIcon size={25} />
+        </strong>
+      </div>
+    </fieldset>
   );
 }
 function ReviewAward({
@@ -1779,9 +1869,11 @@ function ReviewAward({
   reject: () => void;
 }) {
   const [unitStars, setStars] = useState(stars),
-    [quantity, setQuantity] = useState(1);
+    [quantity, setQuantity] = useState(1),
+    [confirmReject, setConfirmReject] = useState(false);
   return (
     <form
+      className="review-award"
       onSubmit={(e) => {
         e.preventDefault();
         approve({ unit_stars: unitStars, quantity });
@@ -1794,14 +1886,38 @@ function ReviewAward({
         setStars={setStars}
         setQuantity={setQuantity}
       />
-      <div className="review-actions">
-        <Button type="button" className="secondary" disabled={busy} onClick={reject}>
-          退回
-        </Button>
-        <Button className="primary" disabled={busy}>
-          确认 {quantity} 次，发放 {unitStars * quantity} 星
-        </Button>
-      </div>
+      {confirmReject ? (
+        <div className="reject-confirm" role="alert">
+          <p>确定退回这次提交吗？本次不会发放星星，孩子可以重新提交。</p>
+          <div className="review-actions">
+            <Button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => setConfirmReject(false)}
+            >
+              先不退回
+            </Button>
+            <Button type="button" className="danger-button" disabled={busy} onClick={reject}>
+              确认退回
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="review-actions review-primary-actions">
+          <Button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => setConfirmReject(true)}
+          >
+            退回
+          </Button>
+          <Button className="primary" disabled={busy}>
+            确认并发放 {unitStars * quantity} 星
+          </Button>
+        </div>
+      )}
     </form>
   );
 }
