@@ -219,6 +219,7 @@ public class NativeFlowTest {
     start();
     waitText("家长空间");
     onView(withText(task.getString("title"))).perform(click());
+    waitText(dashboard.getJSONObject("child").getString("name") + " · ");
     onView(withContentDescription("查看任务详情")).check(matches(isDisplayed()));
     onView(withContentDescription("添加备注")).check(matches(isDisplayed()));
     onView(withContentDescription("查看任务详情")).perform(click());

@@ -123,8 +123,23 @@ public class MainActivity extends AppCompatActivity {
     return 4;
   }
 
+  private String selectedChildName() {
+    JSONObject child = data == null ? null : data.optJSONObject("child");
+    String name = child == null ? "" : child.optString("name").trim();
+    if (!name.isEmpty()) return name;
+    for (int i = 0; i < children.length(); i++) {
+      JSONObject option = obj(children, i);
+      if (option.optString("id").equals(childId)) return option.optString("name").trim();
+    }
+    return "小朋友";
+  }
+
   private String subjectName(JSONObject t) {
     return LABELS[subjectIndex(t.optString("subject"))];
+  }
+
+  private String taskSummary(JSONObject task) {
+    return selectedChildName() + " · " + subjectName(task) + " · " + task.optString("title");
   }
 
   @Override
@@ -1175,6 +1190,10 @@ public class MainActivity extends AppCompatActivity {
         }
       );
     }
+    if (parent()) {
+      ui.add(f, ui.text(taskSummary(t), 16, true), -2);
+      ui.gap(f, 8);
+    }
     LinearLayout details = parent() ? collapsedSection(f, "任务详情") : f;
     ui.line(
       details,
@@ -1207,7 +1226,6 @@ public class MainActivity extends AppCompatActivity {
     if (parent() && array(t, "submissions").length() == 0 && date.compareTo(today()) >= 0) {
       details.addView(ui.button("编辑这一天的规则", false, () -> ruleForm(t, true)));
     }
-    if (parent()) ui.line(f, "点亮每次星星并选择完成次数，确认前可随时调整");
     AwardSelection award = parent()
       ? awardFields(
         f,
@@ -2005,7 +2023,7 @@ public class MainActivity extends AppCompatActivity {
               LinearLayout f = form();
               ui.line(
                 f,
-                (task ? subjectName(r) + " · " : "心愿 · ") + r.optString("title")
+                task ? taskSummary(r) : "心愿 · " + r.optString("title")
               );
               LinearLayout details = collapsedSection(f, task ? "任务详情" : "心愿详情");
               reviewDetails(details, r, task);
