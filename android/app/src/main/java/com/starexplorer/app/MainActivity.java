@@ -1081,9 +1081,62 @@ public class MainActivity extends AppCompatActivity {
     return f;
   }
 
+  private LinearLayout collapsedSection(LinearLayout parent, String label) {
+    LinearLayout body = ui.col();
+    body.setVisibility(View.GONE);
+    TextView[] control = new TextView[1];
+    control[0] = ui.button("查看" + label + "  ▾", false, () -> {
+      boolean expanded = body.getVisibility() != View.VISIBLE;
+      body.setVisibility(expanded ? View.VISIBLE : View.GONE);
+      control[0].setText((expanded ? "收起" : "查看") + label + (expanded ? "  ▴" : "  ▾"));
+      control[0].setContentDescription((expanded ? "收起" : "查看") + label);
+      parent.requestLayout();
+      if (activeDialog != null) parent.post(() -> {
+        if (activeDialog != null) resizeDialog(activeDialog);
+      });
+    });
+    control[0].setMinHeight(0);
+    control[0].setContentDescription("查看" + label);
+    ui.add(parent, control[0], 40);
+    ui.gap(parent, 8);
+    ui.add(parent, body, -2);
+    return body;
+  }
+
+  private EditText optionalNote(LinearLayout parent, String label) {
+    LinearLayout body = ui.col();
+    EditText note = ui.input(
+      body,
+      label,
+      "",
+      InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+    );
+    body.setVisibility(View.GONE);
+    TextView[] control = new TextView[1];
+    control[0] = ui.button("＋ 添加备注（选填）", false, () -> {
+      boolean expanded = body.getVisibility() != View.VISIBLE;
+      body.setVisibility(expanded ? View.VISIBLE : View.GONE);
+      control[0].setText(expanded ? "收起备注  ▴" : "＋ 添加备注（选填）");
+      control[0].setContentDescription(expanded ? "收起备注" : "添加备注");
+      parent.requestLayout();
+      if (activeDialog != null) parent.post(() -> {
+        if (activeDialog != null) resizeDialog(activeDialog);
+      });
+    });
+    control[0].setMinHeight(0);
+    control[0].setContentDescription("添加备注");
+    ui.add(parent, control[0], 40);
+    ui.gap(parent, 8);
+    ui.add(parent, body, -2);
+    return note;
+  }
+
   private void taskDetail(JSONObject t) {
     LinearLayout f = form();
-    if (t.optInt("approved") + t.optInt("pending") < t.optInt("daily_limit")) {
+    if (
+      !parent() &&
+      t.optInt("approved") + t.optInt("pending") < t.optInt("daily_limit")
+    ) {
       LinearLayout intro = ui.row();
       ui.pad(intro, 12);
       intro.setBackground(ui.bg(skin.soft, 20, false));
@@ -1095,7 +1148,7 @@ public class MainActivity extends AppCompatActivity {
       ui.gap(message, 8);
       ui.add(
         message,
-        ui.text(parent() ? "确认后，为孩子点亮星星" : "提交后，等待家长确认", 14, false),
+        ui.text("提交后，等待家长确认", 14, false),
         -2
       );
       intro.addView(message, new LinearLayout.LayoutParams(0, -2, 1));
@@ -1122,13 +1175,14 @@ public class MainActivity extends AppCompatActivity {
         }
       );
     }
+    LinearLayout details = parent() ? collapsedSection(f, "任务详情") : f;
     ui.line(
-      f,
+      details,
       subjectName(t) + " · " + t.optString("date") + " · 规则 v" + t.optInt("rule_version")
     );
-    ui.line(f, t.optString("description"));
+    ui.line(details, t.optString("description"));
     ui.line(
-      f,
+      details,
       "每次 " +
         t.optInt("stars") +
         " 星，每天最多 " +
@@ -1139,24 +1193,10 @@ public class MainActivity extends AppCompatActivity {
         t.optInt("pending") +
         " 次。"
     );
-    if (parent()) ui.line(f, "点亮每次星星并选择完成次数，确认前可随时调整");
-    AwardSelection award = parent()
-      ? awardFields(
-        f,
-        t.optInt("stars"),
-        t.optInt("daily_limit") - t.optInt("approved") - t.optInt("pending")
-      )
-      : null;
-    EditText note = parent() ? ui.input(
-      f,
-      "完成备注（选填）",
-      "",
-      InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-    ) : null;
     for (int i = 0; i < array(t, "submissions").length(); i++) {
       JSONObject s = obj(array(t, "submissions"), i);
       ui.line(
-        f,
+        details,
         status(s.optString("status")) +
           " · " +
           s.optString("note") +
@@ -1165,8 +1205,17 @@ public class MainActivity extends AppCompatActivity {
       );
     }
     if (parent() && array(t, "submissions").length() == 0 && date.compareTo(today()) >= 0) {
-      f.addView(ui.button("编辑这一天的规则", false, () -> ruleForm(t, true)));
+      details.addView(ui.button("编辑这一天的规则", false, () -> ruleForm(t, true)));
     }
+    if (parent()) ui.line(f, "点亮每次星星并选择完成次数，确认前可随时调整");
+    AwardSelection award = parent()
+      ? awardFields(
+        f,
+        t.optInt("stars"),
+        t.optInt("daily_limit") - t.optInt("approved") - t.optInt("pending")
+      )
+      : null;
+    EditText note = parent() ? optionalNote(f, "完成备注（选填）") : null;
     boolean can =
       t.optInt("approved") + t.optInt("pending") < t.optInt("daily_limit") &&
       date.compareTo(data.optString("today")) <= 0 &&
@@ -1745,7 +1794,7 @@ public class MainActivity extends AppCompatActivity {
     int unitStars;
     int quantity = 1;
     final int limit;
-    TextView unitValue, moreValue, total, minus, plus;
+    TextView unitValue, quantityValue, total, minus, plus;
     final ArrayList<TextView> starButtons = new ArrayList<>();
     final ArrayList<TextView> quantityButtons = new ArrayList<>();
     final ArrayList<Integer> quantityValues = new ArrayList<>();
@@ -1778,8 +1827,8 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private void refreshAward(AwardSelection award) {
-    award.unitValue.setText("每次 " + award.unitStars + " 星");
-    award.moreValue.setText(award.unitStars > 5 ? "当前 " + award.unitStars + " 星" : "需要更多？");
+    award.unitValue.setText(award.unitStars + " 星");
+    award.quantityValue.setText(award.quantity + " 次");
     award.minus.setEnabled(award.unitStars > 1);
     award.minus.setAlpha(award.unitStars > 1 ? 1f : .45f);
     award.plus.setEnabled(award.unitStars < 101);
@@ -1787,7 +1836,7 @@ public class MainActivity extends AppCompatActivity {
     for (int i = 0; i < award.starButtons.size(); i++) {
       int value = i + 1;
       TextView button = award.starButtons.get(i);
-      button.setText((award.unitStars >= value ? "★" : "☆") + "\n" + value);
+      button.setText((award.unitStars >= value ? "★ " : "☆ ") + value);
       awardChoiceStyle(button, award.unitStars == value, true, award.unitStars >= value);
     }
     for (int i = 0; i < award.quantityButtons.size(); i++) {
@@ -1795,11 +1844,20 @@ public class MainActivity extends AppCompatActivity {
       awardChoiceStyle(award.quantityButtons.get(i), award.quantity == value, false, false);
     }
     award.total.setText(
+      "实发 " +
+        award.unitStars * award.quantity +
+        " 颗星星  ·  " +
+        award.quantity +
+        " × " +
+        award.unitStars +
+        " 星"
+    );
+    award.total.setContentDescription(
       "本次实发 " +
         award.unitStars * award.quantity +
-        " 颗星星\n" +
+        " 颗星星，" +
         award.quantity +
-        " 次 × 每次 " +
+        " 次，每次 " +
         award.unitStars +
         " 星"
     );
@@ -1808,17 +1866,36 @@ public class MainActivity extends AppCompatActivity {
   private AwardSelection awardFields(LinearLayout f, int stars, int limit) {
     AwardSelection award = new AwardSelection(stars, limit);
     LinearLayout panel = ui.col();
-    ui.pad(panel, 14);
+    ui.pad(panel, 12);
     panel.setBackground(ui.bg(skin.soft, 16, true));
-    ui.add(panel, ui.text("本次奖励", 17, true), -2);
-    ui.gap(panel, 12);
 
     LinearLayout starHeading = ui.row();
-    starHeading.addView(ui.label("每次发放"), new LinearLayout.LayoutParams(0, -2, 1));
+    starHeading.setGravity(Gravity.CENTER_VERTICAL);
+    TextView starLabel = ui.text("每次星星", 15, true);
+    starHeading.addView(starLabel, new LinearLayout.LayoutParams(0, -2, 1));
+    award.minus = ui.button("−", false, () -> {
+      award.unitStars = Math.max(1, award.unitStars - 1);
+      refreshAward(award);
+    });
+    award.minus.setMinHeight(0);
+    award.minus.setPadding(0, 0, 0, 0);
+    award.minus.setTextSize(20);
+    award.minus.setContentDescription("减少一颗星星");
+    starHeading.addView(award.minus, ui.lp(40, 40));
     award.unitValue = ui.text("", 14, true);
-    starHeading.addView(award.unitValue);
-    ui.add(panel, starHeading, -2);
-    ui.gap(panel, 8);
+    award.unitValue.setGravity(Gravity.CENTER);
+    starHeading.addView(award.unitValue, ui.lp(64, 40));
+    award.plus = ui.button("+", false, () -> {
+      award.unitStars = Math.min(101, award.unitStars + 1);
+      refreshAward(award);
+    });
+    award.plus.setMinHeight(0);
+    award.plus.setPadding(0, 0, 0, 0);
+    award.plus.setTextSize(18);
+    award.plus.setContentDescription("增加一颗星星");
+    starHeading.addView(award.plus, ui.lp(40, 40));
+    ui.add(panel, starHeading, 40);
+    ui.gap(panel, 6);
 
     LinearLayout starsRow = ui.row();
     for (int value = 1; value <= 5; value++) {
@@ -1827,80 +1904,60 @@ public class MainActivity extends AppCompatActivity {
         award.unitStars = selected;
         refreshAward(award);
       });
-      choice.setTextSize(16);
+      choice.setMinHeight(0);
+      choice.setPadding(ui.dp(4), 0, ui.dp(4), 0);
+      choice.setTextSize(15);
       choice.setContentDescription("每次发放 " + value + " 颗星星");
       award.starButtons.add(choice);
-      starsRow.addView(choice, new LinearLayout.LayoutParams(0, ui.dp(60), 1));
+      starsRow.addView(choice, new LinearLayout.LayoutParams(0, ui.dp(44), 1));
       if (value < 5) ui.gap(starsRow, 6);
     }
-    ui.add(panel, starsRow, 60);
-    ui.gap(panel, 8);
-
-    LinearLayout stepper = ui.row();
-    award.minus = ui.button("−", false, () -> {
-      award.unitStars = Math.max(1, award.unitStars - 1);
-      refreshAward(award);
-    });
-    award.minus.setTextSize(22);
-    award.minus.setContentDescription("减少一颗星星");
-    stepper.addView(award.minus, ui.lp(48, 44));
-    award.moreValue = ui.label("");
-    award.moreValue.setGravity(Gravity.CENTER);
-    stepper.addView(award.moreValue, new LinearLayout.LayoutParams(0, -2, 1));
-    award.plus = ui.button("+", false, () -> {
-      award.unitStars = Math.min(101, award.unitStars + 1);
-      refreshAward(award);
-    });
-    award.plus.setTextSize(20);
-    award.plus.setContentDescription("增加一颗星星");
-    stepper.addView(award.plus, ui.lp(48, 44));
-    ui.add(panel, stepper, 44);
-    ui.gap(panel, 14);
+    ui.add(panel, starsRow, 44);
+    ui.gap(panel, 10);
 
     LinearLayout quantityHeading = ui.row();
-    quantityHeading.addView(ui.label("完成次数"), new LinearLayout.LayoutParams(0, -2, 1));
-    TextView quantityValue = ui.text("1 次", 14, true);
-    quantityHeading.addView(quantityValue);
+    quantityHeading.addView(ui.text("完成次数", 15, true), new LinearLayout.LayoutParams(0, -2, 1));
+    award.quantityValue = ui.text("", 14, true);
+    quantityHeading.addView(award.quantityValue);
     ui.add(panel, quantityHeading, -2);
-    ui.gap(panel, 8);
+    ui.gap(panel, 6);
 
     ArrayList<Integer> values = new ArrayList<>();
     for (int value = 1; value <= Math.min(award.limit, 10); value++) values.add(value);
     if (award.limit > 10) values.add(award.limit);
-    for (int start = 0; start < values.size(); start += 5) {
-      LinearLayout row = ui.row();
-      for (int slot = 0; slot < 5; slot++) {
-        int index = start + slot;
-        if (index < values.size()) {
-          int value = values.get(index);
-          TextView choice = ui.button(
-            value == award.limit && award.limit > 10 ? "最多\n" + value : String.valueOf(value),
-            false,
-            () -> {
-              award.quantity = value;
-              quantityValue.setText(value + " 次");
-              refreshAward(award);
-            }
-          );
-          choice.setTextSize(value == award.limit && award.limit > 10 ? 12 : 15);
-          choice.setContentDescription("本次完成 " + value + " 次");
-          award.quantityButtons.add(choice);
-          award.quantityValues.add(value);
-          row.addView(choice, new LinearLayout.LayoutParams(0, ui.dp(48), 1));
-        } else row.addView(new Space(this), new LinearLayout.LayoutParams(0, ui.dp(48), 1));
-        if (slot < 4) ui.gap(row, 6);
-      }
-      ui.add(panel, row, 48);
-      if (start + 5 < values.size()) ui.gap(panel, 7);
+    LinearLayout quantityRow = ui.row();
+    for (int value : values) {
+      TextView choice = ui.button(
+        value == award.limit && award.limit > 10 ? "最多 " + value : String.valueOf(value),
+        false,
+        () -> {
+          award.quantity = value;
+          refreshAward(award);
+        }
+      );
+      choice.setMinHeight(0);
+      choice.setPadding(ui.dp(4), 0, ui.dp(4), 0);
+      choice.setTextSize(value == award.limit && award.limit > 10 ? 12 : 15);
+      choice.setContentDescription("本次完成 " + value + " 次");
+      award.quantityButtons.add(choice);
+      award.quantityValues.add(value);
+      quantityRow.addView(choice, ui.lp(value == award.limit && award.limit > 10 ? 66 : 44, 42));
+      ui.gap(quantityRow, 6);
     }
-    ui.gap(panel, 12);
+    HorizontalScrollView quantityScroll = new HorizontalScrollView(this);
+    quantityScroll.setHorizontalScrollBarEnabled(false);
+    quantityScroll.setFillViewport(false);
+    quantityScroll.addView(quantityRow, new HorizontalScrollView.LayoutParams(-2, ui.dp(42)));
+    ui.add(panel, quantityScroll, 42);
+    ui.gap(panel, 10);
 
     award.total = ui.text("", 16, true);
+    award.total.setTextSize(15);
     award.total.setTextColor(0xFFFFFFFF);
-    award.total.setLineSpacing(ui.dp(4), 1f);
-    award.total.setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12));
+    award.total.setGravity(Gravity.CENTER_VERTICAL);
+    award.total.setPadding(ui.dp(12), 0, ui.dp(12), 0);
     award.total.setBackground(ui.bg(skin.primary, 14, false));
-    ui.add(panel, award.total, -2);
+    ui.add(panel, award.total, 44);
     refreshAward(award);
     ui.add(f, panel, -2);
     ui.gap(f, 12);
@@ -1946,16 +2003,16 @@ public class MainActivity extends AppCompatActivity {
           actions.addView(
             ui.button(approve ? "通过" : "退回", approve, () -> {
               LinearLayout f = form();
-              reviewDetails(f, r, task);
-              EditText note = ui.input(
+              ui.line(
                 f,
-                "给孩子的话（选填）",
-                "",
-                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                (task ? subjectName(r) + " · " : "心愿 · ") + r.optString("title")
               );
+              LinearLayout details = collapsedSection(f, task ? "任务详情" : "心愿详情");
+              reviewDetails(details, r, task);
               AwardSelection award = task && approve
                 ? awardFields(f, r.optInt("stars"), r.optInt("remaining", 1))
                 : null;
+              EditText note = optionalNote(f, "给孩子的话（选填）");
               dialog(approve ? "确认通过" : "退回申请", f, approve ? "通过" : "退回", () ->
                 mutation(
                   "/api/" +

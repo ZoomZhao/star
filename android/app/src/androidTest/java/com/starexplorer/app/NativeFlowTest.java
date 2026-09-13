@@ -219,17 +219,27 @@ public class NativeFlowTest {
     start();
     waitText("家长空间");
     onView(withText(task.getString("title"))).perform(click());
+    onView(withContentDescription("查看任务详情")).check(matches(isDisplayed()));
+    onView(withContentDescription("添加备注")).check(matches(isDisplayed()));
+    onView(withContentDescription("查看任务详情")).perform(click());
+    onView(withContentDescription("收起任务详情")).check(matches(isDisplayed()));
+    onView(withContentDescription("收起任务详情")).perform(click());
+    onView(withContentDescription("添加备注")).perform(click());
+    waitText("完成备注（选填）");
+    onView(withContentDescription("收起备注")).perform(click());
     onView(
       withContentDescription("每次发放 " + task.getInt("stars") + " 颗星星")
     ).check(matches(isDisplayed()));
     onView(withContentDescription("本次完成 1 次")).check(matches(isDisplayed()));
-    waitText("本次实发 " + task.getInt("stars") + " 颗星星");
+    waitText("实发 " + task.getInt("stars") + " 颗星星");
     onView(withContentDescription("关闭")).perform(click());
     onView(withContentDescription("审核")).perform(click());
     waitText(task.getString("title"));
     onView(withText("通过")).perform(click());
+    onView(withContentDescription("查看任务详情")).check(matches(isDisplayed()));
+    onView(withContentDescription("添加备注")).check(matches(isDisplayed()));
     onView(withContentDescription("每次发放 3 颗星星")).perform(click());
-    waitText("本次实发 3 颗星星");
+    waitText("实发 3 颗星星");
     onView(withText("通过")).perform(click());
     Thread.sleep(700);
     JSONObject approved = (JSONObject) client.get(
