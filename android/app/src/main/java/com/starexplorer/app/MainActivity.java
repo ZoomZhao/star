@@ -1139,11 +1139,17 @@ public class MainActivity extends AppCompatActivity {
         t.optInt("pending") +
         " 次。"
     );
-    EditText[] award = parent() ? awardFields(f, t.optInt("stars"), t.optInt("daily_limit") - t.optInt("approved") - t.optInt("pending")) : null;
-    ui.line(f, "家长可调整本次每次星星和完成次数");
+    if (parent()) ui.line(f, "点亮每次星星并选择完成次数，确认前可随时调整");
+    AwardSelection award = parent()
+      ? awardFields(
+        f,
+        t.optInt("stars"),
+        t.optInt("daily_limit") - t.optInt("approved") - t.optInt("pending")
+      )
+      : null;
     EditText note = parent() ? ui.input(
       f,
-      "想告诉家长的话（选填）",
+      "完成备注（选填）",
       "",
       InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
     ) : null;
@@ -1734,27 +1740,177 @@ public class MainActivity extends AppCompatActivity {
     });
   }
 
-  private EditText[] awardFields(LinearLayout f, int stars, int limit) {
-    EditText unit = ui.input(f, "每次发放星星（1–101）", String.valueOf(stars), 2);
-    EditText quantity = ui.input(f, "本次完成次数（最多 " + limit + " 次，含待确认上限）", "1", 2);
-    TextView total = ui.text("合计发放 " + stars + " 颗星星", 16, true);
-    ui.add(f, total, -2);
-    android.text.TextWatcher watcher = new android.text.TextWatcher() {
-      public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-      public void onTextChanged(CharSequence s, int start, int before, int count) {
-        int u = number(unit, 1, 101), q = number(quantity, 1, limit);
-        total.setText(u < 1 || q < 1 ? "请填写有效星星和次数" : "合计发放 " + u * q + " 颗星星");
-      }
-      public void afterTextChanged(android.text.Editable e) {}
-    };
-    unit.addTextChangedListener(watcher); quantity.addTextChangedListener(watcher);
-    return new EditText[] {unit, quantity};
+  private static final class AwardSelection {
+
+    int unitStars;
+    int quantity = 1;
+    final int limit;
+    TextView unitValue, moreValue, total, minus, plus;
+    final ArrayList<TextView> starButtons = new ArrayList<>();
+    final ArrayList<TextView> quantityButtons = new ArrayList<>();
+    final ArrayList<Integer> quantityValues = new ArrayList<>();
+
+    AwardSelection(int stars, int limit) {
+      unitStars = Math.max(1, Math.min(101, stars));
+      this.limit = Math.max(1, Math.min(20, limit));
+    }
   }
 
-  private JSONObject awardBody(JSONObject body, EditText[] award) {
+  private void awardChoiceStyle(TextView button, boolean selected, boolean star, boolean filled) {
+    int face = selected
+      ? (star
+        ? androidx.core.graphics.ColorUtils.blendARGB(skin.surface, 0xFFFFD25E, .38f)
+        : skin.primary)
+      : skin.surface;
+    int text = selected
+      ? (star ? 0xFF9A6B00 : 0xFFFFFFFF)
+      : (star && filled ? 0xFFD09119 : skin.primary);
+    android.graphics.drawable.GradientDrawable shape = ui.bg(face, 12, false);
+    shape.setStroke(ui.dp(selected ? 2 : 1), selected ? (star ? 0xFFD7A728 : skin.primary) : skin.border);
+    button.setBackground(
+      new android.graphics.drawable.RippleDrawable(
+        android.content.res.ColorStateList.valueOf(0x22444444),
+        shape,
+        null
+      )
+    );
+    button.setTextColor(text);
+  }
+
+  private void refreshAward(AwardSelection award) {
+    award.unitValue.setText("每次 " + award.unitStars + " 星");
+    award.moreValue.setText(award.unitStars > 5 ? "当前 " + award.unitStars + " 星" : "需要更多？");
+    award.minus.setEnabled(award.unitStars > 1);
+    award.minus.setAlpha(award.unitStars > 1 ? 1f : .45f);
+    award.plus.setEnabled(award.unitStars < 101);
+    award.plus.setAlpha(award.unitStars < 101 ? 1f : .45f);
+    for (int i = 0; i < award.starButtons.size(); i++) {
+      int value = i + 1;
+      TextView button = award.starButtons.get(i);
+      button.setText((award.unitStars >= value ? "★" : "☆") + "\n" + value);
+      awardChoiceStyle(button, award.unitStars == value, true, award.unitStars >= value);
+    }
+    for (int i = 0; i < award.quantityButtons.size(); i++) {
+      int value = award.quantityValues.get(i);
+      awardChoiceStyle(award.quantityButtons.get(i), award.quantity == value, false, false);
+    }
+    award.total.setText(
+      "本次实发 " +
+        award.unitStars * award.quantity +
+        " 颗星星\n" +
+        award.quantity +
+        " 次 × 每次 " +
+        award.unitStars +
+        " 星"
+    );
+  }
+
+  private AwardSelection awardFields(LinearLayout f, int stars, int limit) {
+    AwardSelection award = new AwardSelection(stars, limit);
+    LinearLayout panel = ui.col();
+    ui.pad(panel, 14);
+    panel.setBackground(ui.bg(skin.soft, 16, true));
+    ui.add(panel, ui.text("本次奖励", 17, true), -2);
+    ui.gap(panel, 12);
+
+    LinearLayout starHeading = ui.row();
+    starHeading.addView(ui.label("每次发放"), new LinearLayout.LayoutParams(0, -2, 1));
+    award.unitValue = ui.text("", 14, true);
+    starHeading.addView(award.unitValue);
+    ui.add(panel, starHeading, -2);
+    ui.gap(panel, 8);
+
+    LinearLayout starsRow = ui.row();
+    for (int value = 1; value <= 5; value++) {
+      final int selected = value;
+      TextView choice = ui.button("", false, () -> {
+        award.unitStars = selected;
+        refreshAward(award);
+      });
+      choice.setTextSize(16);
+      choice.setContentDescription("每次发放 " + value + " 颗星星");
+      award.starButtons.add(choice);
+      starsRow.addView(choice, new LinearLayout.LayoutParams(0, ui.dp(60), 1));
+      if (value < 5) ui.gap(starsRow, 6);
+    }
+    ui.add(panel, starsRow, 60);
+    ui.gap(panel, 8);
+
+    LinearLayout stepper = ui.row();
+    award.minus = ui.button("−", false, () -> {
+      award.unitStars = Math.max(1, award.unitStars - 1);
+      refreshAward(award);
+    });
+    award.minus.setTextSize(22);
+    award.minus.setContentDescription("减少一颗星星");
+    stepper.addView(award.minus, ui.lp(48, 44));
+    award.moreValue = ui.label("");
+    award.moreValue.setGravity(Gravity.CENTER);
+    stepper.addView(award.moreValue, new LinearLayout.LayoutParams(0, -2, 1));
+    award.plus = ui.button("+", false, () -> {
+      award.unitStars = Math.min(101, award.unitStars + 1);
+      refreshAward(award);
+    });
+    award.plus.setTextSize(20);
+    award.plus.setContentDescription("增加一颗星星");
+    stepper.addView(award.plus, ui.lp(48, 44));
+    ui.add(panel, stepper, 44);
+    ui.gap(panel, 14);
+
+    LinearLayout quantityHeading = ui.row();
+    quantityHeading.addView(ui.label("完成次数"), new LinearLayout.LayoutParams(0, -2, 1));
+    TextView quantityValue = ui.text("1 次", 14, true);
+    quantityHeading.addView(quantityValue);
+    ui.add(panel, quantityHeading, -2);
+    ui.gap(panel, 8);
+
+    ArrayList<Integer> values = new ArrayList<>();
+    for (int value = 1; value <= Math.min(award.limit, 10); value++) values.add(value);
+    if (award.limit > 10) values.add(award.limit);
+    for (int start = 0; start < values.size(); start += 5) {
+      LinearLayout row = ui.row();
+      for (int slot = 0; slot < 5; slot++) {
+        int index = start + slot;
+        if (index < values.size()) {
+          int value = values.get(index);
+          TextView choice = ui.button(
+            value == award.limit && award.limit > 10 ? "最多\n" + value : String.valueOf(value),
+            false,
+            () -> {
+              award.quantity = value;
+              quantityValue.setText(value + " 次");
+              refreshAward(award);
+            }
+          );
+          choice.setTextSize(value == award.limit && award.limit > 10 ? 12 : 15);
+          choice.setContentDescription("本次完成 " + value + " 次");
+          award.quantityButtons.add(choice);
+          award.quantityValues.add(value);
+          row.addView(choice, new LinearLayout.LayoutParams(0, ui.dp(48), 1));
+        } else row.addView(new Space(this), new LinearLayout.LayoutParams(0, ui.dp(48), 1));
+        if (slot < 4) ui.gap(row, 6);
+      }
+      ui.add(panel, row, 48);
+      if (start + 5 < values.size()) ui.gap(panel, 7);
+    }
+    ui.gap(panel, 12);
+
+    award.total = ui.text("", 16, true);
+    award.total.setTextColor(0xFFFFFFFF);
+    award.total.setLineSpacing(ui.dp(4), 1f);
+    award.total.setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12));
+    award.total.setBackground(ui.bg(skin.primary, 14, false));
+    ui.add(panel, award.total, -2);
+    refreshAward(award);
+    ui.add(f, panel, -2);
+    ui.gap(f, 12);
+    return award;
+  }
+
+  private JSONObject awardBody(JSONObject body, AwardSelection award) {
     if (award != null) try {
-      body.put("unit_stars", number(award[0], 1, 101));
-      body.put("quantity", number(award[1], 1, 20));
+      body.put("unit_stars", award.unitStars);
+      body.put("quantity", award.quantity);
     } catch (Exception e) { throw new IllegalArgumentException(e); }
     return body;
   }
@@ -1797,7 +1953,9 @@ public class MainActivity extends AppCompatActivity {
                 "",
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
               );
-              EditText[] award = task && approve ? awardFields(f, r.optInt("stars"), r.optInt("remaining", 1)) : null;
+              AwardSelection award = task && approve
+                ? awardFields(f, r.optInt("stars"), r.optInt("remaining", 1))
+                : null;
               dialog(approve ? "确认通过" : "退回申请", f, approve ? "通过" : "退回", () ->
                 mutation(
                   "/api/" +

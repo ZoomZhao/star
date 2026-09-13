@@ -218,16 +218,25 @@ public class NativeFlowTest {
     auth("parent", "parent123");
     start();
     waitText("家长空间");
+    onView(withText(task.getString("title"))).perform(click());
+    onView(
+      withContentDescription("每次发放 " + task.getInt("stars") + " 颗星星")
+    ).check(matches(isDisplayed()));
+    onView(withContentDescription("本次完成 1 次")).check(matches(isDisplayed()));
+    waitText("本次实发 " + task.getInt("stars") + " 颗星星");
+    onView(withContentDescription("关闭")).perform(click());
     onView(withContentDescription("审核")).perform(click());
     waitText(task.getString("title"));
     onView(withText("通过")).perform(click());
+    onView(withContentDescription("每次发放 3 颗星星")).perform(click());
+    waitText("本次实发 3 颗星星");
     onView(withText("通过")).perform(click());
     Thread.sleep(700);
     JSONObject approved = (JSONObject) client.get(
       "/api/children/" + child.getString("id") + "/dashboard"
     );
     assertEquals(
-      balance + task.getInt("stars"),
+      balance + 3,
       approved.getJSONObject("wallet").getInt("balance")
     );
     scenario.close();
