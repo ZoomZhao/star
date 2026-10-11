@@ -99,6 +99,7 @@ test('completing the last allowed task returns focus to its title when the trigg
   page,
 }) => {
   await login(page, 'parent');
+  await page.getByRole('button', { name: '更多', exact: true }).click();
   await page.getByRole('button', { name: '任务规则', exact: true }).click();
   await page.getByRole('button', { name: '添加任务', exact: true }).click();
   const title = '完成后焦点测试 ' + randomUUID();
@@ -215,7 +216,7 @@ test('subject selection exposes its state without shifting controls across skins
 }) => {
   await login(page);
   const group = page.getByRole('group', { name: '科目分类', exact: true });
-  const labels = ['语文', '数学', '英语', '体育', '其他'];
+  const labels = ['全部', '语文', '数学', '英语', '体育', '其他'];
 
   for (const { width, height, skin } of [
     { width: 390, height: 844, skin: 'dino' },
@@ -223,11 +224,14 @@ test('subject selection exposes its state without shifting controls across skins
   ]) {
     await page.setViewportSize({ width, height });
     if (skin === 'princess') {
+      await page.getByRole('button', { name: '更多', exact: true }).click();
       await page.getByRole('button', { name: '换装', exact: true }).click();
       await page.getByRole('button', { name: /公主花园/ }).click();
+      await page.getByRole('button', { name: '今日任务', exact: true }).click();
     }
     await expect(page.locator('html')).toHaveAttribute('data-skin', skin);
     await expect(group.getByRole('button')).toHaveCount(labels.length);
+    await page.evaluate(() => document.fonts.ready);
     const before = await buttonRects(group);
     for (const selected of ['英语', '数学', '语文']) {
       await group.getByRole('button', { name: selected, exact: true }).click();

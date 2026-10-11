@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
-        <item name="colorPrimary">#216848</item>
-        <item name="colorPrimaryDark">#184F36</item>
-        <item name="colorAccent">#B95379</item>
+        <item name="colorPrimary">#6C5CFF</item>
+        <item name="colorPrimaryDark">#5145D1</item>
+        <item name="colorAccent">#6C5CFF</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
-        <item name="android:statusBarColor">#FBF8EC</item>
-        <item name="android:navigationBarColor">#FBF8EC</item>
+        <item name="android:statusBarColor">#F7F7FF</item>
+        <item name="android:navigationBarColor">#F7F7FF</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowBackground">#FBF8EC</item>
+        <item name="android:windowBackground">#F7F7FF</item>
         <item name="android:windowSoftInputMode">adjustResize</item>
     </style>
 </resources>

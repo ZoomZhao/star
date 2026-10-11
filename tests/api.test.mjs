@@ -928,3 +928,547 @@ test('custom award quantities respect remaining capacity, replay safely and rest
   assert.equal(restored.tasks.find((t) => t.id === task.id).approved, 9);
   assert.equal(restored.wallet.balance, d.wallet.balance + 20);
 });
+
+async function cardRule(s, stars = 3, daily_limit = 10) {
+  const result = await s.call(
+    `/api/children/${s.child.user.id}/rules`,
+    'POST',
+    {
+      title: '自定义实体任务卡',
+      description: '保留规则和今日快照',
+      subject: 'chinese',
+      icon: 'book',
+      stars,
+      daily_limit,
+      schedule: 'daily',
+    },
+    s.parent.token,
+  );
+  assert.equal(result.status, 201);
+  return (await s.dashboard()).tasks.find((task) => task.rule_key === result.data.rule_key);
+}
+function claim(
+  s,
+  task,
+  operation = uid(),
+  token = s.parent.token,
+  date = today(),
+  cardUid = operation.replaceAll('-', '').slice(0, 14).toUpperCase(),
+) {
+  return s.call(
+    `/api/children/${task.child_id}/task-cards/claim`,
+    'POST',
+    { rule_key: task.rule_key, date, card_uid: cardUid },
+    token,
+    operation,
+  );
+}
+function adjust(s, entry, amount, operation = uid(), token = s.parent.token) {
+  return s.call(
+    `/api/ledger/${entry.id}/adjust`,
+    'POST',
+    { amount, expected_amount: entry.amount },
+    token,
+    operation,
+  );
+}
+
+test('card instantly approves the oldest pending submission using today snapshot; retry never grants twice', async (t) => {
+  const s = await setup(t),
+    task = await cardRule(s);
+  const pending = await s.call(
+    `/api/tasks/${task.id}/submit`,
+    'POST',
+    { note: '孩子已完成' },
+    s.child.token,
+    uid(),
+  );
+  assert.equal(pending.status, 200);
+  await s.call(
+    `/api/rules/${task.rule_key}`,
+    'PATCH',
+    { ...task, title: '明天规则', subject: 'english', stars: 9, daily_limit: 1, schedule: 'daily' },
+    s.parent.token,
+  );
+  const before = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data.data;
+  const initialBalance = (await s.dashboard()).wallet.balance,
+    operation = uid();
+  const results = await Promise.all([claim(s, task, operation), claim(s, task, operation)]);
+  assert.ok(results.every((r) => r.status === 200));
+  assert.equal(results[0].data.entry.id, results[1].data.entry.id);
+  assert.equal(results[0].data.submission.id, pending.data.id);
+  assert.equal(results[0].data.entry.amount, 3);
+  assert.equal(results[0].data.task.daily_limit, 10);
+  assert.equal(results[0].data.task.title, task.title);
+  const after = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data.data;
+  assert.deepEqual(after.rules, before.rules);
+  assert.deepEqual(after.tasks, before.tasks);
+  assert.equal(after.submissions.length, before.submissions.length);
+  assert.equal(after.ledger.length, before.ledger.length + 1);
+  assert.equal((await s.dashboard()).wallet.balance, initialBalance + 3);
+  const changedPayload = await claim(s, { ...task, rule_key: uid() }, operation);
+  assert.equal(changedPayload.status, 409);
+});
+
+test('card respects ten completions, permissions and dates; no pending submission creates one completion', async (t) => {
+  const s = await setup(t),
+    task = await cardRule(s, 2);
+  await s.call(`/api/tasks/${task.id}/submit`, 'POST', { quantity: 9 }, s.parent.token, uid());
+  const before = await s.dashboard();
+  assert.equal((await claim(s, task)).status, 200);
+  assert.equal((await claim(s, task)).status, 409);
+  assert.equal((await claim(s, task, uid(), s.child.token)).status, 403);
+  assert.equal((await claim(s, task, uid(), s.parent.token, addDays(today(), 1))).status, 400);
+  assert.equal((await claim(s, { ...task, rule_key: uid() })).status, 404);
+  const family = (await s.call('/api/admin/families', 'POST', { name: '其他家庭' }, s.admin.token))
+    .data;
+  const foreign = (
+    await s.call(
+      '/api/admin/users',
+      'POST',
+      {
+        family_id: family.id,
+        role: 'child',
+        username: 'foreign-card',
+        name: '其他孩子',
+        password: 'password123',
+      },
+      s.admin.token,
+    )
+  ).data;
+  assert.equal((await claim(s, { ...task, child_id: foreign.id })).status, 403);
+  const after = await s.dashboard();
+  assert.equal(after.wallet.balance, before.wallet.balance + 2);
+  assert.equal(after.tasks.find((x) => x.id === task.id).approved, 10);
+  assert.equal(after.tasks.find((x) => x.id === task.id).daily_limit, 10);
+});
+
+test('award corrections append auditable records, replay safely, preserve completions and restore from backup', async (t) => {
+  const s = await setup(t),
+    task = await cardRule(s),
+    initial = await s.dashboard();
+  const award = (await claim(s, task)).data.entry;
+  const before = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  const operation = uid(),
+    increased = await adjust(s, award, 5, operation);
+  assert.equal(increased.status, 200);
+  const replay = await adjust(s, award, 5, operation);
+  assert.equal(replay.data.entry.id, increased.data.entry.id);
+  assert.equal((await adjust(s, award, 4, operation)).status, 409);
+  assert.equal((await adjust(s, award, 6)).status, 409);
+  const decreased = await adjust(s, increased.data.entry, 2);
+  assert.equal(decreased.status, 200);
+  const after = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  for (const table of ['rules', 'tasks', 'submissions', 'users', 'families'])
+    assert.deepEqual(after.data[table], before.data[table]);
+  for (const entry of before.data.ledger)
+    assert.deepEqual(
+      after.data.ledger.find((x) => x.id === entry.id),
+      entry,
+    );
+  assert.equal(after.data.ledger.length, before.data.ledger.length + 4);
+  const current = await s.dashboard();
+  assert.equal(current.wallet.balance, initial.wallet.balance + 2);
+  assert.equal(current.wallet.earned, initial.wallet.earned + 2);
+  assert.equal(current.wallet.spent, initial.wallet.spent);
+  assert.equal(current.dayEarned, initial.dayEarned + 2);
+  assert.equal(current.week.at(-1).earned, initial.week.at(-1).earned + 2);
+  assert.equal(current.tasks.find((x) => x.id === task.id).approved, 1);
+  assert.equal(
+    (
+      await s.call(
+        '/api/admin/restore',
+        'POST',
+        { backup: after, password: 'local-admin-2026' },
+        s.admin.token,
+      )
+    ).status,
+    200,
+  );
+  s.parent = await s.login('parent', 'parent123');
+  const restored = await s.call(
+    `/api/children/${s.child.user.id}/dashboard`,
+    'GET',
+    null,
+    s.parent.token,
+  );
+  assert.equal(restored.data.wallet.balance, initial.wallet.balance + 2);
+});
+
+test('corrections check final balance atomically and concurrent editors cannot replace an award twice', async (t) => {
+  const s = await setup(t),
+    task = await cardRule(s, 5);
+  const award = (await claim(s, task)).data.entry;
+  const wallet = (await s.dashboard()).wallet;
+  await s.call(
+    `/api/children/${task.child_id}/ledger`,
+    'POST',
+    { amount: wallet.balance, kind: 'spend', title: '用完余额' },
+    s.parent.token,
+    uid(),
+  );
+  const before = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  assert.equal((await adjust(s, award, 2)).status, 409);
+  assert.deepEqual(
+    (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data.data,
+    before.data,
+  );
+  const competing = await Promise.all([adjust(s, award, 6), adjust(s, award, 7)]);
+  assert.deepEqual(competing.map((r) => r.status).sort(), [200, 409]);
+  const successful = competing.find((r) => r.status === 200).data.entry;
+  assert.equal((await s.dashboard()).wallet.balance, successful.amount - award.amount);
+  assert.equal((await adjust(s, successful, 9, uid(), s.child.token)).status, 403);
+  const family = (await s.call('/api/admin/families', 'POST', { name: '另一家庭' }, s.admin.token))
+    .data;
+  await s.call(
+    '/api/admin/users',
+    'POST',
+    {
+      family_id: family.id,
+      role: 'parent',
+      username: 'other-parent',
+      name: '其他家长',
+      password: 'password123',
+    },
+    s.admin.token,
+  );
+  const stranger = await s.login('other-parent', 'password123');
+  assert.equal((await adjust(s, successful, 9, uid(), stranger.token)).status, 403);
+  const bonus = (
+    await s.call(
+      `/api/children/${task.child_id}/ledger`,
+      'POST',
+      { amount: 2, kind: 'bonus', title: '普通奖励' },
+      s.parent.token,
+      uid(),
+    )
+  ).data;
+  assert.equal((await adjust(s, bonus, 3)).status, 409);
+});
+
+test('editing a past award attributes corrected income to its original day without changing history snapshots', async (t) => {
+  const s = await setup(t),
+    date = addDays(today(), -1);
+  const past = await s.dashboard(date),
+    task = past.tasks[0];
+  const award = await s.call(
+    `/api/tasks/${task.id}/submit`,
+    'POST',
+    { unit_stars: 4 },
+    s.parent.token,
+    uid(),
+  );
+  assert.equal(award.status, 200);
+  const entry = (await s.dashboard(date)).ledger.find((x) => x.submission_id === award.data.id);
+  const current = await s.dashboard(),
+    history = await s.dashboard(date);
+  const changed = await adjust(s, entry, 7);
+  assert.equal(changed.status, 200);
+  assert.equal(changed.data.entry.date, date);
+  const after = await s.dashboard(),
+    afterHistory = await s.dashboard(date);
+  assert.equal(after.dayEarned, current.dayEarned);
+  assert.equal(afterHistory.dayEarned, history.dayEarned + 3);
+  assert.equal(after.wallet.balance, current.wallet.balance + 3);
+  assert.equal(after.wallet.earned, current.wallet.earned + 3);
+  assert.deepEqual(afterHistory.tasks, history.tasks);
+});
+
+test('card inspection identifies unscheduled cards without materializing snapshots or changing any records', async (t) => {
+  const s = await setup(t);
+  const rule = (
+    await s.call(
+      `/api/children/${s.child.user.id}/rules`,
+      'POST',
+      {
+        title: '只读检测卡',
+        subject: 'math',
+        stars: 3,
+        daily_limit: 10,
+        schedule: 'daily',
+      },
+      s.parent.token,
+    )
+  ).data;
+  const before = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data.data;
+  const path = `/api/children/${s.child.user.id}/task-cards/${rule.rule_key}`;
+  for (let i = 0; i < 3; i++) {
+    const inspected = await s.call(path, 'GET', null, s.parent.token);
+    assert.equal(inspected.status, 200);
+    assert.equal(inspected.data.child.id, s.child.user.id);
+    assert.equal(inspected.data.rule.title, rule.title);
+    assert.equal(inspected.data.rule.daily_limit, 10);
+    assert.equal(inspected.data.today_task, null);
+    assert.equal(inspected.data.scheduled_today, true);
+    assert.ok(!('password_hash' in inspected.data.child));
+  }
+  assert.equal((await s.call(path, 'GET', null, s.child.token)).status, 403);
+  assert.equal(
+    (
+      await s.call(
+        `/api/children/${s.child.user.id}/task-cards/${uid()}`,
+        'GET',
+        null,
+        s.parent.token,
+      )
+    ).status,
+    404,
+  );
+  assert.deepEqual(
+    (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data.data,
+    before,
+  );
+  const unscheduled = (
+    await s.call(
+      `/api/children/${s.child.user.id}/rules`,
+      'POST',
+      {
+        title: '尚未安排卡',
+        subject: 'sports',
+        stars: 2,
+        daily_limit: 1,
+        schedule: 'once',
+        on_date: '2099-01-01',
+      },
+      s.parent.token,
+    )
+  ).data;
+  const result = await s.call(
+    `/api/children/${s.child.user.id}/task-cards/${unscheduled.rule_key}`,
+    'GET',
+    null,
+    s.parent.token,
+  );
+  assert.equal(result.status, 200);
+  assert.equal(result.data.rule.title, '尚未安排卡');
+  assert.equal(result.data.scheduled_today, false);
+  assert.equal(result.data.today_task, null);
+});
+
+test('card inspection shows latest name and original today snapshot separately and enforces family boundaries', async (t) => {
+  const s = await setup(t),
+    task = await cardRule(s, 3, 10);
+  const pending = await s.call(`/api/tasks/${task.id}/submit`, 'POST', {}, s.child.token, uid());
+  await s.call(
+    `/api/rules/${task.rule_key}`,
+    'PATCH',
+    {
+      ...task,
+      title: '明天的新卡名',
+      subject: 'english',
+      stars: 9,
+      daily_limit: 1,
+      schedule: 'daily',
+      enabled: false,
+    },
+    s.parent.token,
+  );
+  const family = (
+    await s.call('/api/admin/families', 'POST', { name: '检测权限家庭' }, s.admin.token)
+  ).data;
+  const foreign = (
+    await s.call(
+      '/api/admin/users',
+      'POST',
+      {
+        family_id: family.id,
+        role: 'child',
+        username: 'inspect-other',
+        name: '其他孩子',
+        password: 'password123',
+      },
+      s.admin.token,
+    )
+  ).data;
+  const before = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data.data;
+  const result = await s.call(
+    `/api/children/${task.child_id}/task-cards/${task.rule_key}`,
+    'GET',
+    null,
+    s.parent.token,
+  );
+  assert.equal(result.status, 200);
+  assert.equal(result.data.rule.title, '明天的新卡名');
+  assert.equal(result.data.rule.enabled, 0);
+  assert.equal(result.data.today_task.title, task.title);
+  assert.equal(result.data.today_task.stars, 3);
+  assert.equal(result.data.today_task.daily_limit, 10);
+  assert.equal(result.data.today_task.pending, 1);
+  assert.equal(result.data.scheduled_today, true);
+  assert.equal(
+    get(s.db, 'SELECT status FROM submissions WHERE id=?', pending.data.id).status,
+    'pending',
+  );
+  assert.equal(
+    (
+      await s.call(
+        `/api/children/${foreign.id}/task-cards/${task.rule_key}`,
+        'GET',
+        null,
+        s.parent.token,
+      )
+    ).status,
+    403,
+  );
+  assert.deepEqual(
+    (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data.data,
+    before,
+  );
+});
+
+test('one physical card per family per day survives new requests and other parents; ten different cards respect cap', async (t) => {
+  const s = await setup(t),
+    task = await cardRule(s, 2, 10),
+    before = await s.dashboard();
+  const card = '04112233445566';
+  const results = await Promise.all(
+    Array.from({ length: 5 }, () => claim(s, task, uid(), s.parent.token, today(), card)),
+  );
+  assert.ok(results.every((r) => r.status === 200));
+  assert.equal(results.filter((r) => !r.data.already_claimed).length, 1);
+  assert.equal(new Set(results.map((r) => r.data.entry.id)).size, 1);
+  await s.call(
+    '/api/admin/users',
+    'POST',
+    {
+      family_id: s.parent.user.family_id,
+      role: 'parent',
+      username: 'second-card-parent',
+      name: '另一位家长',
+      password: 'password123',
+    },
+    s.admin.token,
+  );
+  const secondParent = await s.login('second-card-parent', 'password123');
+  const duplicate = await claim(s, task, uid(), secondParent.token, today(), card);
+  assert.equal(duplicate.status, 200);
+  assert.equal(duplicate.data.already_claimed, true);
+  for (let i = 1; i <= 9; i++) {
+    const different = '040000000000' + i.toString(16).padStart(2, '0');
+    const result = await claim(s, task, uid(), s.parent.token, today(), different);
+    assert.equal(result.status, 200);
+    assert.equal(result.data.already_claimed, false);
+  }
+  assert.equal(
+    (await claim(s, task, uid(), s.parent.token, today(), '04FFFFFFFFFFFF')).status,
+    409,
+  );
+  assert.equal(
+    (await claim(s, task, uid(), s.parent.token, today(), card)).data.already_claimed,
+    true,
+  );
+  const after = await s.dashboard();
+  assert.equal(after.tasks.find((x) => x.id === task.id).approved, 10);
+  assert.equal(after.tasks.find((x) => x.id === task.id).daily_limit, 10);
+  assert.equal(after.wallet.balance, before.wallet.balance + 20);
+});
+
+test('daily card use does not approve another pending task and persists through correction, reversal and backup restore', async (t) => {
+  const s = await setup(t),
+    task = await cardRule(s, 3, 10),
+    card = '04AABBCCDDEEFF';
+  for (let i = 0; i < 2; i++)
+    assert.equal(
+      (await s.call(`/api/tasks/${task.id}/submit`, 'POST', {}, s.child.token, uid())).status,
+      200,
+    );
+  const first = await claim(s, task, uid(), s.parent.token, today(), card);
+  const corrected = await adjust(s, first.data.entry, 5);
+  const duplicate = await claim(s, task, uid(), s.parent.token, today(), card);
+  assert.equal(duplicate.data.already_claimed, true);
+  assert.equal(duplicate.data.entry.id, corrected.data.entry.id);
+  assert.equal(duplicate.data.entry.amount, 5);
+  assert.equal((await s.dashboard()).tasks.find((x) => x.id === task.id).pending, 1);
+  await s.call(
+    `/api/ledger/${corrected.data.entry.id}/reverse`,
+    'POST',
+    { note: '取消积分但不释放实体卡' },
+    s.parent.token,
+  );
+  const changedBinding = await cardRule(s, 4, 10);
+  const rebound = await claim(s, changedBinding, uid(), s.parent.token, today(), card);
+  assert.equal(rebound.data.already_claimed, true);
+  assert.equal(rebound.data.task.id, task.id);
+  assert.equal((await s.dashboard()).tasks.find((x) => x.id === changedBinding.id).approved, 0);
+  const inspected = await s.call(
+    `/api/children/${task.child_id}/task-cards/${task.rule_key}?card_uid=${card.toLowerCase()}`,
+    'GET',
+    null,
+    s.parent.token,
+  );
+  assert.equal(inspected.data.claimed_today, true);
+  assert.equal(inspected.data.card_uid, card);
+  const backup = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  assert.equal(
+    (
+      await s.call(
+        '/api/admin/restore',
+        'POST',
+        { backup, password: 'local-admin-2026' },
+        s.admin.token,
+      )
+    ).status,
+    200,
+  );
+  s.parent = await s.login('parent', 'parent123');
+  const restored = await claim(s, task, uid(), s.parent.token, today(), card);
+  assert.equal(restored.data.already_claimed, true);
+  const next = await claim(s, task, uid(), s.parent.token, today(), '04000000000002');
+  assert.equal(next.status, 200);
+  assert.equal(next.data.already_claimed, false);
+  const d = (await s.call(`/api/children/${task.child_id}/dashboard`, 'GET', null, s.parent.token))
+    .data;
+  assert.equal(d.tasks.find((x) => x.id === task.id).approved, 2);
+  assert.equal(d.tasks.find((x) => x.id === task.id).pending, 0);
+});
+
+test('the same physical card is reusable after Shanghai midnight, with a new operation and daily cap', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-11T15:59:59Z').getTime() });
+  const s = await setup(t),
+    task = await cardRule(s, 2, 1),
+    card = '04111122223333';
+  const first = await claim(s, task, uid(), s.parent.token, today(), card);
+  assert.equal(first.status, 200);
+  assert.equal(first.data.already_claimed, false);
+  assert.equal(
+    (await claim(s, task, uid(), s.parent.token, today(), card)).data.already_claimed,
+    true,
+  );
+  t.mock.timers.tick(2000);
+  assert.equal(today(), '2026-10-12');
+  const nextDay = await claim(s, task, uid(), s.parent.token, today(), card);
+  assert.equal(nextDay.status, 200);
+  assert.equal(nextDay.data.already_claimed, false);
+  assert.notEqual(nextDay.data.entry.id, first.data.entry.id);
+  assert.equal(nextDay.data.task.daily_limit, 1);
+  assert.equal(
+    (await claim(s, task, uid(), s.parent.token, today(), card)).data.already_claimed,
+    true,
+  );
+});
+
+test('physical card identity is required and operation identifiers cannot be reused for a different card', async (t) => {
+  const s = await setup(t),
+    task = await cardRule(s),
+    operation = uid();
+  const path = `/api/children/${task.child_id}/task-cards/claim`;
+  for (const card_uid of [undefined, '', 'not-a-uid', '0411']) {
+    const result = await s.call(
+      path,
+      'POST',
+      { rule_key: task.rule_key, date: today(), card_uid },
+      s.parent.token,
+      uid(),
+    );
+    assert.equal(result.status, 400);
+  }
+  const first = await claim(s, task, operation, s.parent.token, today(), '04112233445566');
+  assert.equal(first.status, 200);
+  assert.equal(
+    (await claim(s, task, operation, s.parent.token, today(), '04AABBCCDDEEFF')).status,
+    409,
+  );
+  const replay = await claim(s, task, operation, s.parent.token, today(), '04112233445566');
+  assert.equal(replay.data.replayed, true);
+  assert.equal(replay.data.entry.id, first.data.entry.id);
+});

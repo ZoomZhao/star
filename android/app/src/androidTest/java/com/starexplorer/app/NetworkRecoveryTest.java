@@ -7,17 +7,20 @@ import android.content.Context;
 import android.content.Intent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import com.starexplorer.app.nativeui.StarApi;
 import java.io.*;
+import java.lang.reflect.Method;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -134,6 +137,15 @@ public class NetworkRecoveryTest {
     return null;
   }
 
+  private View tagged(View v, String tag) {
+    if (tag.equals(v.getTag())) return v;
+    if (v instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) v).getChildCount(); i++) {
+      View found = tagged(((ViewGroup) v).getChildAt(i), tag);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
   private void waitText(ActivityScenario<MainActivity> scenario, String text, boolean click)
     throws Exception {
     long end = System.currentTimeMillis() + 12000;
@@ -144,7 +156,12 @@ public class NetworkRecoveryTest {
         TextView v = find(a.getWindow().getDecorView(), text);
         if (v != null) {
           found.set(true);
-          if (click) v.performClick();
+          if (click) {
+            View target = v;
+            while (!target.isClickable() && target.getParent() instanceof View)
+              target = (View) target.getParent();
+            target.performClick();
+          }
         }
       });
       if (found.get()) return;
@@ -177,6 +194,97 @@ public class NetworkRecoveryTest {
         waitText(scenario, "initial offline", true);
         waitText(scenario, "还没有分配小朋友", false);
         assertTrue(attempts.get() >= 2);
+      }
+      api.forget();
+    }
+  }
+
+  @Test
+  public void unchangedRefreshKeepsRuleListAndItsScrollPosition() throws Exception {
+    Context c = context();
+    AtomicInteger dashboardReads = new AtomicInteger();
+    StringBuilder rules = new StringBuilder();
+    for (int i = 0; i < 10; i++) {
+      if (i > 0) rules.append(',');
+      rules.append(
+        "{\"id\":\"rule-" +
+        i +
+        "\",\"rule_key\":\"key-" +
+        i +
+        "\",\"title\":\"规则 " +
+        i +
+        "\",\"description\":\"保持滚动位置\",\"icon\":\"book\",\"subject\":\"chinese\",\"stars\":1,\"daily_limit\":2,\"schedule\":\"daily\",\"weekdays\":[],\"on_date\":null,\"effective_from\":\"2026-09-14\",\"enabled\":1,\"version\":1}"
+      );
+    }
+    String dashboard =
+      "{\"today\":\"2026-09-13\",\"date\":\"2026-09-13\",\"child\":{\"id\":\"child-1\",\"name\":\"测试孩子\",\"role\":\"child\"},\"tasks\":[],\"wallet\":{\"balance\":0,\"earned\":0,\"spent\":0},\"ledger\":[],\"week\":[],\"reviews\":[],\"rules\":[" +
+      rules +
+      "],\"rewards\":[],\"redemptions\":[],\"dayEarned\":0}";
+    try (
+      Server server = new Server((path, headers) -> {
+        if (path.equals("/api/me")) return new String[] {
+          "200 OK",
+          "{\"id\":\"parent-1\",\"name\":\"测试家长\",\"role\":\"parent\",\"family_id\":\"family-1\"}",
+        };
+        if (path.equals("/api/children")) return new String[] {
+          "200 OK",
+          "[{\"id\":\"child-1\",\"name\":\"测试孩子\",\"role\":\"child\",\"family_id\":\"family-1\"}]",
+        };
+        if (path.equals("/api/task-templates")) return new String[] { "200 OK", "[]" };
+        if (path.startsWith("/api/children/child-1/dashboard")) {
+          dashboardReads.incrementAndGet();
+          return new String[] { "200 OK", dashboard };
+        }
+        return new String[] { "404 Not Found", "{\"error\":\"not found\"}" };
+      })
+    ) {
+      StarApi api = new StarApi(c, server.base());
+      api.authenticate("isolated-test-session");
+      Intent intent = new Intent(c, MainActivity.class).putExtra("test_api", server.base());
+      try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(intent)) {
+        waitText(scenario, "更多", true);
+        waitText(scenario, "任务规则", true);
+        waitText(scenario, "规则 9", false);
+        AtomicReference<View> original = new AtomicReference<>();
+        AtomicInteger scrollY = new AtomicInteger();
+        scenario.onActivity(activity -> {
+          ScrollView scroll = (ScrollView) tagged(
+            activity.getWindow().getDecorView(),
+            "rules-scroll"
+          );
+          assertNotNull(scroll);
+          scroll.fullScroll(View.FOCUS_DOWN);
+          original.set(scroll);
+        });
+        Thread.sleep(150);
+        scenario.onActivity(activity -> {
+          ScrollView scroll = (ScrollView) tagged(
+            activity.getWindow().getDecorView(),
+            "rules-scroll"
+          );
+          assertTrue(scroll.getScrollY() > 0);
+          scrollY.set(scroll.getScrollY());
+          try {
+            Method refresh = MainActivity.class.getDeclaredMethod("refresh", boolean.class);
+            refresh.setAccessible(true);
+            refresh.invoke(activity, false);
+          } catch (Exception e) {
+            throw new AssertionError(e);
+          }
+        });
+        long deadline = System.currentTimeMillis() + 5000;
+        while (dashboardReads.get() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(20);
+        assertTrue("Refresh request did not complete", dashboardReads.get() >= 2);
+        Thread.sleep(200);
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+        scenario.onActivity(activity -> {
+          ScrollView scroll = (ScrollView) tagged(
+            activity.getWindow().getDecorView(),
+            "rules-scroll"
+          );
+          assertSame("Unchanged data must not rebuild the current page", original.get(), scroll);
+          assertEquals(scrollY.get(), scroll.getScrollY());
+        });
       }
       api.forget();
     }

@@ -10,6 +10,7 @@
 - 恐龙探险、公主花园、太空小熊、海底小鲸、森林小狐五套皮肤，选择保存在设备上。Android 左侧主角支持点击摇摆、轻弹和扭动，连续点击切换动作并出现星星反馈；网页提供静态主题插画。系统关闭动画时使用静态反馈，离开页面停止动效。五张 ImageGen 科目插画在两端共用。
 - ImageGen 先生成手机与横屏平板设计，再用真实组件还原。任务插画、角色互动、音效开关、Android 触感与提交反馈。
 - 每日任务 / 日期切换 / 规则详情 / 重复完成次数与每日上限 / 家长审批及代完成。
+- Android 家长端 NFC 实体任务卡：规则页制作可重复使用的任务卡，碰卡直接发星并播放到账动画；手机亮屏解锁后，也可从桌面碰卡自动打开应用。优先审核已有提交，否则代完成；同一张实体卡每天只发星一次，多张同任务卡分别计次，仍遵守当天快照及每日上限，支持之后修改本次积分。“检测卡片 · 不发星”显示绑定信息、实体卡编号与今天是否已确认，方便给实体卡贴标签。采购与使用见 [NFC 任务卡试用](docs/NFC-TASK-CARDS.md)。
 - 每日、每周、指定日期任务模板；模板版本与每日任务快照；当天无提交任务可单独修改。
 - 星星余额、累计获得和消耗、近 7 日图表、按日流水、额外奖励、消费、扣星、反向流水撤销。
 - 家长在奖励小铺新增、编辑名称/说明/图片图标/星星价格，按全部/已上架/已下架筛选，快捷下架或重新上架，并进入兑换审核。孩子只看到上架奖励；已有兑换申请保留当时的商品名及价格。
@@ -55,7 +56,7 @@ npm run android:build
 npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-产物为 `artifacts/star-explorer-native.apk`（0.2.16-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
+产物为 `artifacts/star-explorer-native.apk`（0.3.1-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
 
 发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 
@@ -148,10 +149,16 @@ npm run test:e2e     # 浏览器端完整流程，独立内存数据库，不影
 npm run build       # TypeScript + Web 生产构建
 ```
 
-浏览器测试使用本机 Chrome，启动独立 3002 / 5174 端口。当前 17 项 API 测试、27 项浏览器流程通过，覆盖家长点选星星、次数上限、退回防误触及手机宽度。Android 0.2.4-native 构建、2 项布局单元测试、2 项网络恢复测试和 2 项 RefinementTest 流程通过；界面测试使用 2800×1840 / 400 dpi 专用模拟器和独立测试包。视觉预览见 `docs/design/native/IMPLEMENTATION.md`，本次家长端优化见 `docs/REVIEW-2026-09-13.md`，此前修复细节见 `docs/REVIEW-2026-09-08.md`。
+浏览器测试使用本机 Chrome，启动独立 3002 / 5174 端口。当前 28 项 API 测试、27 项浏览器流程通过，覆盖家长点选星星、次数上限、退回防误触及手机宽度。Android 0.2.4-native 构建、2 项布局单元测试、2 项网络恢复测试和 2 项 RefinementTest 流程通过；界面测试使用 2800×1840 / 400 dpi 专用模拟器和独立测试包。视觉预览见 `docs/design/native/IMPLEMENTATION.md`，本次家长端优化见 `docs/REVIEW-2026-09-13.md`，此前修复细节见 `docs/REVIEW-2026-09-08.md`。
 
 设计图、生成提示词位于 `docs/design/`；界面截图位于 `docs/screenshots/`。原始 PNG 保留在设计目录，应用使用压缩 WebP。
 
 官方参考：[Android Views](https://developer.android.com/develop/ui/views/layout/declaring-layout)、[Node SQLite API](https://nodejs.org/docs/latest-v24.x/api/sqlite.html)。
 
 整体 Review 的修复、验证范围与后续建议见 [家长端体验 Review](docs/REVIEW-2026-09-13.md) 和 [系统 Review](docs/REVIEW-2026-09-08.md)。
+
+## 全新界面（0.3.0）
+
+按 ImageGen 新稿重做孩子、家长和管理端：浅紫与靛蓝配色、紧凑任务行、手机底部导航、平板侧栏及待确认预览。首页专注任务；碰卡发星、规则、制卡、检测和账号设置集中在更多。任务名称放大，完成次数以内联 0/1 显示。到账页优先显示本次积分、继续碰卡和修改积分。管理端统一账号、密码、搜索、备份操作图标；Android 离线打包 39 个 Lucide 图标。设计稿及生成提示词见 `design/imagegen/`。
+
+验证使用独立内存数据库和 `com.starexplorer.app.testbed`：11 项 NFC 流程、手机/平板/竖屏平板/大字体下的角色与图标检查；自定义每日上限 10 次及规则、任务快照和账本在只读导航前后保持一致。发布前后另对生产完整备份按记录 ID 和全部字段核对。

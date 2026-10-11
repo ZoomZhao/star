@@ -25,22 +25,19 @@ public final class JourneyView extends FrameLayout {
     bg.setCornerRadius(ui.dp(22));
     bg.setStroke(ui.dp(1), 0xFFECD6AB);
     setBackground(bg);
-    LinearLayout content = ui.col();
-    content.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-    content.setPadding(ui.dp(12), ui.dp(8), ui.dp(12), 0);
-    FrameLayout medallion = new FrameLayout(c);
-    medallion.setBackground(ui.bg(0xFFFFF0BC, 24, true));
-    medallion.addView(new StarView(c, skin), new FrameLayout.LayoutParams(-1, -1));
-    content.addView(medallion, ui.lp(44, 44));
-    ui.gap(content, 7);
-    TextView title = ui.text("星星收集之旅", 18, true);
+    LinearLayout content = ui.row();
+    content.setGravity(Gravity.CENTER_VERTICAL);
+    content.setPadding(ui.dp(12), ui.dp(12), ui.dp(12), ui.dp(12));
+    content.addView(new StarView(c, skin), ui.lp(40, 40));
+    ui.gap(content, 10);
+    LinearLayout copy = ui.col();
+    TextView title = ui.text("星星收集之旅", 16, true);
     title.setTextColor(skin.primary);
-    title.setGravity(Gravity.CENTER);
-    content.addView(title);
-    ui.gap(content, 7);
-    TextView note = ui.text("每一份努力，都值得被看见", 12, false);
-    note.setGravity(Gravity.CENTER);
-    content.addView(note, ui.lp(-1, -2));
+    ui.add(copy, title, -2); ui.gap(copy, 6);
+    TextView note = ui.label("每一份努力，都值得被看见");
+    note.setTextSize(11);
+    ui.add(copy, note, -2);
+    content.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
     addView(content, new LayoutParams(-1, -1));
   }
 

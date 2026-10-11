@@ -4,37 +4,11 @@ import android.graphics.Color;
 
 /** Skin tokens and bundled artwork are independent of business rules. */
 public enum Skin {
-  DINO(
-    "dino",
-    "恐龙探险",
-    "星星探险家",
-    "今天也要闪闪发光",
-    "#FBF8EC",
-    "#FFFDF5",
-    "#216848",
-    "#2D7E4C",
-    "#DAEAD0",
-    "#294B35",
-    "#898572",
-    "#E6DCBD"
-  ),
-  PRINCESS(
-    "princess",
-    "公主花园",
-    "星星公主",
-    "每一天，都闪闪发光",
-    "#FFF5F4",
-    "#FFFCF9",
-    "#B24B73",
-    "#DF7599",
-    "#FBE0E7",
-    "#723C55",
-    "#A38389",
-    "#F0CBD3"
-  ),
-  SPACE("space", "太空小熊", "星际小熊", "小小勇气，探索大宇宙", "#F4F2FC", "#FDFCFF", "#6252A0", "#9A8ACB", "#E6E0F8", "#3B365A", "#807993", "#D7CEEB"),
-  OCEAN("ocean", "海底小鲸", "小鲸奇遇记", "每一份努力，都荡起小浪花", "#EDF8FA", "#FBFEFE", "#237789", "#5AB7BC", "#D1EEF0", "#28525D", "#71949B", "#BCE1E5"),
-  FOREST("forest", "森林小狐", "森林小队长", "带着好奇，发现成长的宝藏", "#FBF4EA", "#FFFCF6", "#936039", "#D69752", "#F4E3C8", "#5D4736", "#988575", "#E5D2B8");
+  DINO("dino", "恐龙探险", "星星探险家", "今天也要闪闪发光", "#F7F7FF", "#FFFFFF", "#6C5CFF", "#8B7FFF", "#EEEBFF", "#24274F", "#8185A0", "#E9E9F5"),
+  PRINCESS("princess", "公主花园", "星星公主", "每一天，都闪闪发光", "#FCF8FF", "#FFFFFF", "#AE68B5", "#CD97D0", "#F6EBF8", "#24274F", "#8185A0", "#E9E9F5"),
+  SPACE("space", "太空小熊", "星际小熊", "小小勇气，探索大宇宙", "#F7F7FF", "#FFFFFF", "#646BD8", "#8D93E6", "#ECEFFE", "#24274F", "#8185A0", "#E9E9F5"),
+  OCEAN("ocean", "海底小鲸", "小鲸奇遇记", "每一份努力，都荡起小浪花", "#F7FBFF", "#FFFFFF", "#438DC2", "#6EACD6", "#E7F3FC", "#24274F", "#8185A0", "#E9E9F5"),
+  FOREST("forest", "森林小狐", "森林小队长", "带着好奇，发现成长的宝藏", "#F7FBFA", "#FFFFFF", "#548F87", "#7CB2A8", "#E9F5F1", "#24274F", "#8185A0", "#E9E9F5");
 
   public final String key, label, title, subtitle;
   public final int background, surface, primary, accent, soft, ink, muted, border;

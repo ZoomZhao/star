@@ -16,7 +16,7 @@ public final class SparkleView extends FrameLayout {
   private final Skin skin;
   private final float density;
   private final LinearLayout badge;
-  private final StarView star;
+  private final ArtView star;
   private float progress;
   private ValueAnimator animator;
   private final Runnable finish = this::remove;
@@ -38,8 +38,8 @@ public final class SparkleView extends FrameLayout {
     badge.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
     badge.setContentDescription(title + "。" + subtitle);
     badge.setAccessibilityLiveRegion(ACCESSIBILITY_LIVE_REGION_POLITE);
-    star = new StarView(context, skin);
-    badge.addView(star, ui.lp(100, 100));
+    star = new ArtView(context, "island-v2/star-mascot.png").fit();
+    badge.addView(star, ui.lp(220, 150));
     TextView heading = ui.text(title, 25, true);
     heading.setGravity(Gravity.CENTER);
     badge.addView(heading, ui.lp(-1, -2));

@@ -10,6 +10,20 @@ async function login(page: any, role = 'child') {
     .click();
   await expect(page.getByRole('button', { name: '设置', exact: true })).toBeVisible();
 }
+test('home keeps NFC tools in more and shows compact progress beside larger task titles', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page, 'parent');
+  await expect(page.getByRole('button', { name: '碰卡发星', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '检测卡片', exact: true })).toHaveCount(0);
+  const task = page.locator('.task-card').first();
+  await expect(task.locator('.task-title .task-count')).toHaveText(/^\d+\/\d+$/);
+  await expect(task).not.toContainText('次已完成');
+  expect(await task.locator('.task-title').evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
+  await page.getByRole('button', { name: '更多', exact: true }).click();
+  await expect(page.getByRole('button', { name: '检测卡片', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '碰卡发星', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '实体任务卡', exact: true })).toBeVisible();
+});
 test('tablet child submits, parent approves, wallet and reward request complete', async ({
   page,
   request,
@@ -66,7 +80,7 @@ test('tablet child submits, parent approves, wallet and reward request complete'
   await expect(review.locator('input[type="number"]')).toHaveCount(0);
   await review.getByRole('button', { name: '确认并发放 6 星' }).click();
   await expect(review).toHaveCount(0);
-  await page.getByRole('button', { name: '星星口袋', exact: true }).click();
+  await page.getByRole('banner').getByRole('button', { name: '星星口袋', exact: true }).click();
   await expect(page.locator('.ledger-row').filter({ hasText: title })).toContainText('+6');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '退出 / 更换账号' }).click();
@@ -94,18 +108,18 @@ test('mobile and tablet layouts fit width and dialog controls remain accessible'
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
     ).toBeTruthy();
-    if (width > 900) {
+    if (width >= 1080) {
       expect(
-        await page.locator('.adventure').evaluate((el) => el.getBoundingClientRect().right),
+        await page.locator('.daily-content').evaluate((el) => el.getBoundingClientRect().right),
       ).toBeLessThan(
-        await page.locator('.daily-content').evaluate((el) => el.getBoundingClientRect().left),
+        await page.locator('.adventure').evaluate((el) => el.getBoundingClientRect().left),
       );
     }
     await page.getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.getByRole('button', { name: '退出 / 更换账号' })).toBeVisible();
     await page.getByRole('button', { name: '关闭', exact: true }).click();
   }
-  await page.getByRole('button', { name: '星星口袋', exact: true }).click();
+  await page.getByRole('banner').getByRole('button', { name: '星星口袋', exact: true }).click();
   await expect(page.getByText('可用星星', { exact: true })).toBeVisible();
   await page.getByLabel('收支筛选').selectOption('out');
   await expect(page.locator('.ledger')).toContainText('买冰淇淋');
@@ -114,6 +128,7 @@ test('mobile and tablet layouts fit width and dialog controls remain accessible'
 });
 test('parent creates capped weekly rule and reward through UI', async ({ page }) => {
   await login(page, 'parent');
+  await page.getByRole('button', { name: '更多', exact: true }).click();
   await page.getByRole('button', { name: '任务规则', exact: true }).click();
   await page.getByRole('button', { name: '添加任务', exact: true }).click();
   const title = '练习拼图 ' + Date.now();
@@ -159,7 +174,7 @@ test('remembered login, subject presets, skins, and landscape main actions stay 
   await login(page);
   for (const label of ['语文', '数学', '英语', '体育', '其他']) {
     await page.getByRole('button', { name: label, exact: true }).click();
-    await expect(page.locator('.subject-art').first()).toHaveAttribute('alt', label);
+    await expect(page.locator('.subject-icon').first()).toHaveAttribute('aria-label', label);
   }
   await page.getByRole('button', { name: '语文', exact: true }).click();
   for (const button of await page
@@ -169,10 +184,12 @@ test('remembered login, subject presets, skins, and landscape main actions stay 
     expect(box).not.toBeNull();
     expect(box!.y + box!.height).toBeLessThanOrEqual(704);
   }
+  await page.getByRole('button', { name: '更多', exact: true }).click();
   await page.getByRole('button', { name: '换装', exact: true }).click();
   await page.getByRole('button', { name: /公主花园/ }).click();
   await expect(page.locator('html')).toHaveAttribute('data-skin', 'princess');
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: '今日任务', exact: true }).click();
   await page.screenshot({ path: 'artifacts/web-princess-landscape.png', fullPage: true });
   const another = await context.newPage();
   await another.goto('/');
@@ -185,6 +202,7 @@ test('remembered login, subject presets, skins, and landscape main actions stay 
   await page.reload();
   await expect(page.getByRole('button', { name: '出发，去星星岛', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '家长', exact: true }).click();
+  await page.getByRole('button', { name: '更多', exact: true }).click();
   await page.getByRole('button', { name: '任务规则', exact: true }).click();
   await page.getByRole('button', { name: '添加任务', exact: true }).click();
   await page.getByLabel('选择预制模板（可修改）').selectOption('3');
@@ -339,6 +357,7 @@ test('family-load failure offers a working retry instead of reporting an unalloc
 
 test('parent task order persists after reload within its subject', async ({ page }) => {
   await login(page, 'parent');
+  await page.getByRole('button', { name: '更多', exact: true }).click();
   await page.getByRole('button', { name: '任务规则', exact: true }).click();
   await page.getByRole('button', { name: '体育', exact: true }).click();
   const cards = page.locator('.rule-card').filter({ hasText: '体育 ·' });
@@ -346,6 +365,7 @@ test('parent task order persists after reload within its subject', async ({ page
   await cards.nth(1).getByRole('button', { name: '上移', exact: true }).click();
   await expect(cards.first().locator('h3')).toHaveText(moving);
   await page.reload();
+  await page.getByRole('button', { name: '更多', exact: true }).click();
   await page.getByRole('button', { name: '任务规则', exact: true }).click();
   await page.getByRole('button', { name: '体育', exact: true }).click();
   await expect(cards.first().locator('h3')).toHaveText(moving);
@@ -355,14 +375,20 @@ test('foreground polling refreshes after 20 seconds, pauses hidden, and refreshe
   page,
   request,
 }) => {
+  await page.setViewportSize({ width: 390, height: 500 });
   const config = await (await request.get('http://127.0.0.1:3002/api/config')).json();
   await page.clock.install({ time: new Date(config.today + 'T12:00:00+08:00') });
   let reads = 0;
   page.on('request', (r) => {
     if (r.url().includes('/dashboard?')) reads++;
   });
-  await login(page);
+  await login(page, 'parent');
   await expect(page.locator('.task-card').first()).toBeVisible();
+  await page.getByRole('button', { name: '更多', exact: true }).click();
+  await page.getByRole('button', { name: '任务规则', exact: true }).click();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const scrollY = await page.evaluate(() => window.scrollY);
+  expect(scrollY).toBeGreaterThan(0);
   const initial = reads;
   await page.clock.fastForward(19000);
   expect(reads).toBe(initial);
@@ -370,6 +396,7 @@ test('foreground polling refreshes after 20 seconds, pauses hidden, and refreshe
   await page.clock.fastForward(2000);
   await next;
   expect(reads).toBe(initial + 1);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollY);
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
     document.dispatchEvent(new Event('visibilitychange'));
@@ -383,6 +410,7 @@ test('foreground polling refreshes after 20 seconds, pauses hidden, and refreshe
   });
   await resumed;
   expect(reads).toBe(initial + 2);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollY);
 });
 
 test('all five skins have usable artwork and preserve the chosen theme on reload', async ({
@@ -396,10 +424,12 @@ test('all five skins have usable artwork and preserve the chosen theme on reload
     ['princess', '公主花园', '星星公主'],
     ['dino', '恐龙探险', '星星探险家'],
   ]) {
+    await page.getByRole('button', { name: '更多', exact: true }).click();
     await page.getByRole('button', { name: '换装', exact: true }).click();
     await expect(page.locator('.skin-options button')).toHaveCount(5);
     await page.locator('.skin-options button').filter({ hasText: label }).click();
     await expect(page.locator('html')).toHaveAttribute('data-skin', key);
+    await page.getByRole('button', { name: '今日任务', exact: true }).click();
     await expect(page.locator('.hero-copy h1')).toHaveText(title);
     await expect
       .poll(() =>

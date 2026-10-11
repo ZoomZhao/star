@@ -20,6 +20,9 @@ public final class ArtView extends View {
   private final Rect source;
   private final Paint paint = new Paint(3);
   private final Path clip = new Path();
+  private boolean contain;
+
+  public ArtView fit() { contain = true; return this; }
 
   public ArtView(Context c, String asset) {
     this(c, asset, 1, 1, 0);
@@ -53,7 +56,7 @@ public final class ArtView extends View {
     if (bitmap == null) return;
     float w = getWidth(),
       h = getHeight(),
-      scale = Math.max(w / source.width(), h / source.height());
+      scale = contain ? Math.min(w / source.width(), h / source.height()) : Math.max(w / source.width(), h / source.height());
     float bw = source.width() * scale,
       bh = source.height() * scale;
     clip.reset();

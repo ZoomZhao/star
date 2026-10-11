@@ -1,12 +1,12 @@
 package com.starexplorer.app.nativeui;
 
-/** Pure layout math keeps the landscape dashboard bounded by available height. */
+/** Breakpoints use available window width, including portrait tablets and split screen. */
 public final class LayoutPolicy {
 
   private LayoutPolicy() {}
 
   public static boolean landscape(int width, int height) {
-    return width > height && width >= 600;
+    return width >= 840;
   }
 
   public static int tasksPerPage(int width, int height, float fontScale) {

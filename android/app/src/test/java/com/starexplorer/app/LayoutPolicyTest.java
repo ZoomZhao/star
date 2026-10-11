@@ -7,6 +7,14 @@ import org.junit.Test;
 
 public class LayoutPolicyTest {
 
+  @Test public void tabletRailFollowsWindowWidthInEitherOrientation() {
+    assertFalse(LayoutPolicy.landscape(390, 844));
+    assertFalse(LayoutPolicy.landscape(800, 480));
+    assertTrue(LayoutPolicy.landscape(840, 1200));
+    assertTrue(LayoutPolicy.landscape(1120, 736));
+    assertFalse(LayoutPolicy.landscape(600, 900));
+  }
+
   @Test
   public void shortWindowsAndLargeFontsReducePageSize() {
     assertEquals(4, LayoutPolicy.tasksPerPage(1120, 688, 1));

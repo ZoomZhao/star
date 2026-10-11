@@ -26,6 +26,7 @@ import {
   publicUser,
 } from './db.mjs';
 import { snapshot, restore } from './backup.mjs';
+import { registerTaskCardRoutes } from './task-cards.mjs';
 const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -162,6 +163,7 @@ export function createApp(config = {}) {
     return req.user.id + ':' + k;
   };
   const postLedger = ({
+    entryId = uid(),
     childId,
     amount,
     kind,
@@ -176,7 +178,7 @@ export function createApp(config = {}) {
   }) => {
     if (balance(db, childId) + amount < 0) fail(409, '星星余额不足');
     const row = {
-      id: uid(),
+      id: entryId,
       child_id: childId,
       amount,
       kind,
@@ -193,6 +195,22 @@ export function createApp(config = {}) {
     insert(db, 'ledger', row);
     return row;
   };
+  registerTaskCardRoutes({ app, db, role, child, key, postLedger, fail });
+  // Corrections replace an award in statistics, while keeping every audit row.
+  // Older, ordinary reversals retain their existing reporting behavior.
+  const ledgerTotals = (childId, date) =>
+    get(
+      db,
+      `
+    SELECT COALESCE(SUM(CASE WHEN l.amount>0 THEN l.amount ELSE 0 END),0) earned,
+      COALESCE(-SUM(CASE WHEN l.amount<0 THEN l.amount ELSE 0 END),0) spent
+    FROM ledger l WHERE l.child_id=? ${date ? 'AND l.date=?' : ''}
+      AND l.request_key NOT LIKE 'award-adjust-reversal:%'
+      AND NOT EXISTS (SELECT 1 FROM ledger r WHERE r.reversal_of=l.id AND r.request_key LIKE 'award-adjust-reversal:%')
+  `,
+      childId,
+      ...(date ? [date] : []),
+    );
   app.get('/api/task-templates', (_req, res) => res.json(templates));
   app.get('/api/me', (req, res) => res.json(publicUser(req.user)));
   app.post('/api/logout', (req, res) => {
@@ -240,11 +258,7 @@ export function createApp(config = {}) {
         'SELECT id,status,note,review_note,created_at,quantity,unit_stars FROM submissions WHERE task_id=? ORDER BY created_at DESC',
         t.id,
       );
-    const totals = get(
-      db,
-      'SELECT COALESCE(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END),0) earned, COALESCE(-SUM(CASE WHEN amount<0 THEN amount ELSE 0 END),0) spent FROM ledger WHERE child_id=?',
-      c.id,
-    );
+    const totals = ledgerTotals(c.id);
     const ledger = all(
       db,
       'SELECT l.*, (SELECT id FROM ledger x WHERE x.reversal_of=l.id) reversed_by FROM ledger l WHERE child_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1000',
@@ -254,12 +268,7 @@ export function createApp(config = {}) {
       const d = addDays(date, i - 6);
       return {
         date: d,
-        ...get(
-          db,
-          'SELECT COALESCE(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END),0) earned, COALESCE(-SUM(CASE WHEN amount<0 THEN amount ELSE 0 END),0) spent FROM ledger WHERE child_id=? AND date=?',
-          c.id,
-          d,
-        ),
+        ...ledgerTotals(c.id, d),
       };
     });
     const reviews =
@@ -298,12 +307,7 @@ export function createApp(config = {}) {
         'SELECT * FROM redemptions WHERE child_id=? ORDER BY created_at DESC LIMIT 200',
         c.id,
       ),
-      dayEarned: get(
-        db,
-        'SELECT COALESCE(SUM(amount),0) n FROM ledger WHERE child_id=? AND date=? AND amount>0',
-        c.id,
-        date,
-      ).n,
+      dayEarned: ledgerTotals(c.id, date).earned,
     });
   });
   app.post('/api/tasks/:taskId/submit', (req, res) => {

@@ -8,7 +8,9 @@ import android.content.res.Configuration;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
+import android.nfc.NfcAdapter;
 import android.os.*;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.*;
 import android.view.inputmethod.InputMethodManager;
@@ -32,6 +34,7 @@ public class MainActivity extends AppCompatActivity {
   private final ExecutorService worker = Executors.newSingleThreadExecutor();
   private final Handler handler = new Handler(Looper.getMainLooper());
   private StarApi api;
+  private NfcTaskCards taskCards;
   private Ui ui;
   private Skin skin;
   private FrameLayout root, effects;
@@ -45,7 +48,7 @@ public class MainActivity extends AppCompatActivity {
   private String childId = "",
     date = today(),
     page = "today",
-    subject = "chinese",
+    subject = "all",
     rewardFilter = "all",
     error = "";
   private int taskScrollY = 0,
@@ -58,6 +61,13 @@ public class MainActivity extends AppCompatActivity {
   private int contentW = 0,
     contentH = 0;
   private AlertDialog activeDialog;
+  private AlertDialog nfcDialog;
+  private JSONObject lastCardReceipt;
+  private JSONObject inspectedCard;
+  private String inspectionMessage = "等待任务卡…";
+  private String cardStatus = "";
+  private NfcTaskCards.CardRead pendingLaunchCard;
+  private int inspectionVersion = 0;
   private byte[] pendingBackup;
   private final Runnable poll = new Runnable() {
     public void run() {
@@ -163,11 +173,11 @@ public class MainActivity extends AppCompatActivity {
     if (BuildConfig.DEBUG && test != null && test.matches("http://127\\.0\\.0\\.1:[0-9]+")) base =
       test;
     api = new StarApi(this, base);
+    taskCards = new NfcTaskCards(this);
     if (b != null) {
       date = b.getString("date", date);
       page = b.getString("page", page);
       subject = b.getString("subject", subject);
-      if (subject.equals("all")) subject = "chinese";
       taskScrollY = b.getInt("taskScrollY");
       childId = b.getString("childId", "");
     }
@@ -199,7 +209,69 @@ public class MainActivity extends AppCompatActivity {
       }
     });
     render();
+    if (b == null && (getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) handleTaskCardIntent(getIntent());
+    else consumeTaskCardIntent(getIntent());
     if (api.hasSession()) resumeSession();
+  }
+
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    handleTaskCardIntent(intent);
+  }
+
+  void handleTaskCardIntent(Intent intent) {
+    if (intent == null || !NfcAdapter.ACTION_NDEF_DISCOVERED.equals(intent.getAction()) || intent.getBooleanExtra("task-card-consumed", false)) return;
+    try {
+      NfcTaskCards.CardRead read = NfcTaskCards.fromIntent(intent);
+      if (busy || activeDialog != null) {
+        toast("当前操作尚未结束，请完成或关闭窗口后重新碰卡");
+        return;
+      }
+      if (!api.hasSession()) {
+        pendingLaunchCard = null;
+        error = "请先使用家长账号登录，再碰卡发星";
+        render();
+        return;
+      }
+      taskCards.ignoreUntilRemoved(read.tag);
+      pendingLaunchCard = read;
+      processTaskCardLaunch();
+    } catch (RuntimeException e) {
+      pendingLaunchCard = null;
+      error = e instanceof IllegalArgumentException ? e.getMessage() : "任务卡信息读取失败，请重新碰卡";
+      if (page.equals("card-inspect")) {
+        inspectionVersion++;
+        inspectedCard = null;
+        inspectionMessage = error;
+        error = "";
+      }
+      render();
+    } finally { consumeTaskCardIntent(intent); }
+  }
+
+  private void consumeTaskCardIntent(Intent intent) {
+    if (intent == null || !NfcAdapter.ACTION_NDEF_DISCOVERED.equals(intent.getAction())) return;
+    // Keep the activity's original routing identity; clear the NFC payload after handling it.
+    intent.putExtra("task-card-consumed", true);
+    intent.removeExtra(NfcAdapter.EXTRA_TAG);
+    intent.removeExtra(NfcAdapter.EXTRA_ID);
+    intent.removeExtra(NfcAdapter.EXTRA_NDEF_MESSAGES);
+  }
+
+  private void processTaskCardLaunch() {
+    if (pendingLaunchCard == null || !resumed || user == null || !initialized || loading || busy) return;
+    NfcTaskCards.CardRead read = pendingLaunchCard;
+    pendingLaunchCard = null;
+    if (activeDialog != null) { toast("请先关闭当前窗口，再重新碰卡"); return; }
+    if (!parent()) {
+      error = "请使用家长账号登录后碰卡发星";
+      render();
+    } else if (page.equals("card-inspect")) {
+      inspectTaskCard(read.card, read.uid);
+    } else {
+      openTaskCard(read.card, read.uid);
+    }
   }
 
   @Override
@@ -226,18 +298,26 @@ public class MainActivity extends AppCompatActivity {
     handler.removeCallbacks(poll);
     handler.postDelayed(poll, 20000);
     if (user != null && !busy && activeDialog == null) refresh(false);
+    processTaskCardLaunch();
+    startCardScanning();
   }
 
   @Override
   protected void onPause() {
     super.onPause();
     resumed = false;
+    pendingLaunchCard = null;
+    inspectionVersion++;
+    if (inspectionMessage.equals("正在查询这张卡的绑定信息…")) inspectionMessage = "请重新碰卡检测";
     handler.removeCallbacks(poll);
+    if (nfcDialog != null) closeDialog();
+    if (taskCards != null) taskCards.stop();
     if (effects != null) effects.removeAllViews();
   }
 
   @Override
   protected void onDestroy() {
+    if (taskCards != null) taskCards.destroy();
     handler.removeCallbacksAndMessages(null);
     worker.shutdownNow();
     super.onDestroy();
@@ -284,6 +364,10 @@ public class MainActivity extends AppCompatActivity {
             logoutLocal();
           }
           error = err.getMessage() == null ? "操作未完成，请重试" : err.getMessage();
+          if (pendingLaunchCard != null) {
+            pendingLaunchCard = null;
+            error += "；请恢复连接后重新碰卡，本次尚未确认";
+          }
           loading = false;
           if (activeDialog != null) toast(error);
           else render();
@@ -345,10 +429,13 @@ public class MainActivity extends AppCompatActivity {
       async(
         () -> api.get("/api/admin/accounts"),
         r -> {
-          accounts = (JSONObject) r;
+          JSONObject next = (JSONObject) r;
+          boolean unchanged = accounts != null && error.isEmpty() && samePayload(accounts, next);
+          accounts = next;
           loading = false;
           error = "";
-          render();
+          if (!unchanged) render();
+          processTaskCardLaunch();
         },
         false
       );
@@ -357,6 +444,7 @@ public class MainActivity extends AppCompatActivity {
     if (childId.isEmpty()) {
       loading = false;
       render();
+      processTaskCardLaunch();
       return;
     }
     if (data != null && date.equals(data.optString("today")) && !date.equals(today())) {
@@ -374,7 +462,10 @@ public class MainActivity extends AppCompatActivity {
       r -> {
         if (v != requestVersion) return;
         JSONObject previous = data;
-        data = (JSONObject) r;
+        JSONObject next = (JSONObject) r;
+        boolean unchanged =
+          !show && previous != null && error.isEmpty() && samePayload(previous, next);
+        data = next;
         loading = false;
         error = "";
         if (
@@ -383,13 +474,23 @@ public class MainActivity extends AppCompatActivity {
           data.optJSONObject("wallet").optInt("balance") >
             previous.optJSONObject("wallet").optInt("balance")
         ) toast("收到新的星星啦！你的努力被看见了 ★");
-        render();
+        if (!unchanged) render();
+        processTaskCardLaunch();
       },
       false
     );
   }
 
+  private boolean samePayload(Object current, Object next) {
+    return current == next ||
+    (current != null && next != null && current.toString().equals(next.toString()));
+  }
+
   private void mutation(String path, String method, JSONObject body, boolean idem, String message) {
+    mutation(path, method, body, idem, message, null);
+  }
+
+  private void mutation(String path, String method, JSONObject body, boolean idem, String message, Runnable after) {
     async(
       () -> api.call(path, method, body, idem),
       r -> {
@@ -413,6 +514,7 @@ public class MainActivity extends AppCompatActivity {
         ) {
           celebrate("星星点亮啦！", "努力被看见，星星已到账");
         }
+        if (after != null && resumed) after.run();
       },
       true
     );
@@ -451,141 +553,76 @@ public class MainActivity extends AppCompatActivity {
 
   private void render() {
     ui = new Ui(this, skin);
-    wide = LayoutPolicy.landscape(
-      Math.round(contentW / getResources().getDisplayMetrics().density),
-      Math.round(contentH / getResources().getDisplayMetrics().density)
-    );
+    wide = LayoutPolicy.landscape(widthDp(), heightDp());
     root.setBackgroundColor(skin.background);
     root.removeAllViews();
-    if (user == null) {
-      login();
-      return;
-    }
+    if (user == null) { login(); return; }
     LinearLayout shell = ui.col();
-    ui.pad(shell, compact() ? 8 : wide ? 16 : 10);
+    shell.setPadding(ui.dp(wide ? 20 : 14), ui.dp(compact() ? 6 : 10), ui.dp(wide ? 20 : 14), ui.dp(6));
     root.addView(shell, new FrameLayout.LayoutParams(-1, -1));
     LinearLayout header = ui.row();
-    TextView title = ui.text(
-      (skin == Skin.PRINCESS ? "✧  " : "✦  ") +
-        (parent() ? (admin() ? "管理中心" : "家长空间") : user.optString("name") + "的星星日"),
-      wide ? 23 : 19,
-      true
-    );
-    ui.ellipsis(title, 2);
-    header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-    boolean roomyHeader = wide && widthDp() >= 900;
-    boolean dailyPage = !admin() && page.equals("today") && data != null;
-    if (roomyHeader && dailyPage) header.addView(earnedBadge(), ui.lp(-2, 48));
-    else if (roomyHeader && (page.equals("wallet") || page.equals("shop"))) {
-      LinearLayout pageTitle = ui.row();
-      pageTitle.addView(new NavigationIconView(this, skin, page), ui.lp(40, 40));
-      ui.gap(pageTitle, 8);
-      pageTitle.addView(ui.text(page.equals("wallet") ? "星星宝库" : "心愿小铺", 22, true));
-      header.addView(pageTitle, ui.lp(-2, 48));
+    LinearLayout identity = ui.col();
+    ui.add(identity, ui.text(admin() ? "管理中心" : parent() ? selectedChildName() + "的成长日" : user.optString("name") + "的星星日", 21, true), -2);
+    ui.gap(identity, 3);
+    ui.add(identity, ui.label(admin() ? "家庭与账号管理" : "小小行动，慢慢发光"), -2);
+    header.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
+    if (data != null && !admin()) {
+      TextView balance = ui.button("星星 " + data.optJSONObject("wallet").optInt("balance"), false, () -> navigate("wallet"));
+      balance.setContentDescription("星星口袋，可用 " + data.optJSONObject("wallet").optInt("balance") + " 颗星星");
+      header.addView(balance, ui.lp(-2, 44));
+      ui.gap(header, 8);
     }
-    LinearLayout controls = ui.row();
-    controls.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-    controls.addView(ui.button("换装", false, this::skins));
-    ui.gap(controls, 8);
-    controls.addView(ui.button("设置", false, this::settings));
-    if (data != null) {
-      ui.gap(controls, 8);
-      LinearLayout balance = ui.row();
-      balance.setPadding(ui.dp(10), 0, ui.dp(14), 0);
-      balance.setBackground(ui.bg(0xFFFFF4D6, 24, true));
-      balance.addView(new StarView(this, skin), ui.lp(32, 40));
-      ui.gap(balance, 5);
-      if (wide && widthDp() >= 1000) {
-        balance.addView(ui.text("可用星星", 13, false));
-        ui.gap(balance, 6);
-      }
-      balance.addView(ui.text("" + data.optJSONObject("wallet").optInt("balance"), 23, true));
-      balance.setContentDescription(
-        "可用星星 " + data.optJSONObject("wallet").optInt("balance") + "，打开星星宝库"
-      );
-      balance.setFocusable(true);
-      balance.setOnClickListener(v -> navigate("wallet"));
-      controls.addView(balance, ui.lp(-2, 48));
-    }
-    header.addView(
-      controls,
-      new LinearLayout.LayoutParams(
-        roomyHeader && !admin() ? 0 : -2,
-        -2,
-        roomyHeader && !admin() ? 1 : 0
-      )
-    );
-    ui.add(shell, header, compact() ? 52 : 56);
-    ui.gap(shell, compact() ? 6 : 12);
+    LinearLayout settingsIcon = ui.iconBox("Settings", 21);
+    settingsIcon.setContentDescription("设置"); settingsIcon.setFocusable(true); settingsIcon.setOnClickListener(v -> settings());
+    header.addView(settingsIcon, ui.lp(44, 44));
+    ui.add(shell, header, 56);
+    ui.gap(shell, 8);
     if (!error.isEmpty()) {
-      TextView err = ui.button(error + " · 重试", false, () -> refresh(true));
-      ui.add(shell, err, 48);
+      ui.add(shell, ui.button(error + " · 重试", false, () -> refresh(true)), 48);
       ui.gap(shell, 8);
     }
     LinearLayout body = wide ? ui.row() : ui.col();
     ui.grow(shell, body);
     LinearLayout nav = navigation();
-    if (wide) {
-      body.addView(nav, ui.lp(96, -1));
-      ui.gap(body, 16);
-    }
+    if (wide) { body.addView(nav, ui.lp(88, -1)); ui.gap(body, 20); }
     LinearLayout main = ui.col();
     ui.grow(body, main);
     if (parent() && !admin() && children.length() > 1) {
-      String[] names = new String[children.length()];
-      int chosen = 0;
-      for (int i = 0; i < names.length; i++) {
-        names[i] = obj(children, i).optString("name");
-        if (obj(children, i).optString("id").equals(childId)) chosen = i;
+      HorizontalScrollView childScroll = new HorizontalScrollView(this);
+      childScroll.setHorizontalScrollBarEnabled(false);
+      LinearLayout childRow = ui.row();
+      for (int i = 0; i < children.length(); i++) {
+        JSONObject child = obj(children, i);
+        String id = child.optString("id");
+        TextView chip = ui.button(child.optString("name"), false, () -> {
+          if (!childId.equals(id)) { childId = id; data = null; taskScrollY = 0; refresh(true); }
+        });
+        chip.setCompoundDrawables(null, null, null, null);
+        chip.setSelected(childId.equals(id));
+        if (childId.equals(id)) chip.setBackground(ui.bg(skin.soft, 50, true));
+        childRow.addView(chip, ui.lp(-2, 44));
+        ui.gap(childRow, 8);
       }
-      Spinner sp = ui.select(main, "小朋友", names, chosen);
-      sp.setOnItemSelectedListener(
-        new android.widget.AdapterView.OnItemSelectedListener() {
-          public void onNothingSelected(android.widget.AdapterView<?> a) {}
-
-          public void onItemSelected(
-            android.widget.AdapterView<?> a,
-            View v,
-            int position,
-            long id
-          ) {
-            String next = obj(children, position).optString("id");
-            if (!childId.equals(next)) {
-              childId = next;
-              data = null;
-              taskScrollY = 0;
-              refresh(true);
-            }
-          }
-        }
-      );
+      childScroll.addView(childRow);
+      ui.add(main, childScroll, 48);
+      ui.gap(main, 6);
     }
     if (admin() && page.equals("admin")) adminScreen(main);
-    else if (loading) {
-      ui.grow(main, center("正在寻找今天的星星…"));
-    } else if (data == null) {
+    else if (loading) ui.grow(main, center("正在寻找今天的星星…"));
+    else if (page.equals("more")) more(main);
+    else if (data == null) {
       ui.grow(main, center(childId.isEmpty() ? "还没有分配小朋友，请联系管理员" : "星星岛准备中…"));
       main.addView(ui.button("刷新", true, () -> refresh(true)));
     } else switch (page) {
-      case "wallet":
-        wallet(main);
-        break;
-      case "shop":
-        shop(main);
-        break;
-      case "review":
-        reviews(main);
-        break;
-      case "rules":
-        rules(main);
-        break;
-      default:
-        daily(main);
+      case "wallet": wallet(main); break;
+      case "cards": cards(main); break;
+      case "card-inspect": cardInspection(main); break;
+      case "shop": shop(main); break;
+      case "review": reviews(main); break;
+      case "rules": rules(main); break;
+      default: daily(main);
     }
-    if (!wide) {
-      ui.gap(shell, 8);
-      ui.add(shell, nav, 64);
-    }
+    if (!wide) { ui.gap(shell, 8); ui.add(shell, nav, 64); }
   }
 
   private TextView center(String value) {
@@ -595,6 +632,11 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private void navigate(String next) {
+    if (next.equals("rules") && subject.equals("all")) subject = "chinese";
+    if (!next.equals(page)) {
+      taskCards.stop();
+      inspectionVersion++;
+    }
     page = next;
     error = "";
     render();
@@ -603,91 +645,66 @@ public class MainActivity extends AppCompatActivity {
 
   private LinearLayout navigation() {
     LinearLayout nav = wide ? ui.col() : ui.row();
+    nav.setBackground(ui.bg(wide ? Color.TRANSPARENT : skin.surface, 16, false));
+    ui.pad(nav, 4);
     String[][] items = admin()
-      ? new String[][] { { "admin", "⚙", "管理" } }
+      ? new String[][] { { "admin", "管理" }, { "more", "更多" } }
       : parent()
-        ? new String[][] {
-            { "today", "✦", "任务" },
-            { "review", "✓", "审核" },
-            { "rules", "▤", "规则" },
-            { "wallet", "★", "星星" },
-            { "shop", "♧", "小铺" },
-          }
-        : new String[][] {
-            { "today", "✦", "今日任务" },
-            { "wallet", "★", "星星宝库" },
-            { "shop", "♧", "心愿小铺" },
-          };
-    if (wide) {
-      nav.setBackground(ui.bg(skin.surface, 24, true));
-      ui.pad(nav, 6);
-      if (!compact()) {
-        FrameLayout seal = new FrameLayout(this);
-        StarView emblem = new StarView(this, skin);
-        emblem.setBackground(ui.bg(0xFFFFF2CD, 26, true));
-        seal.addView(emblem, new FrameLayout.LayoutParams(ui.dp(48), ui.dp(48), Gravity.CENTER));
-        ui.add(nav, seal, 68);
-        ui.gap(nav, 10);
-      }
-    }
+        ? new String[][] { { "today", "今日" }, { "review", "待确认" }, { "shop", "心愿" }, { "more", "更多" } }
+        : new String[][] { { "today", "今日任务" }, { "wallet", "星星宝库" }, { "shop", "心愿小铺" }, { "more", "更多" } };
     for (String[] n : items) {
-      FrameLayout item = new FrameLayout(this);
-      item.setSelected(page.equals(n[0]));
-      item.setBackground(
-        new android.graphics.drawable.RippleDrawable(
-          android.content.res.ColorStateList.valueOf(0x22444444),
-          ui.bg(page.equals(n[0]) ? skin.soft : Color.TRANSPARENT, 18, page.equals(n[0])),
-          null
-        )
-      );
-      LinearLayout content = ui.col();
-      content.setGravity(Gravity.CENTER);
-      int iconSize = wide ? (parent() || compact() ? 40 : 60) : 28;
-      content.addView(new NavigationIconView(this, skin, n[0]), ui.lp(iconSize, iconSize));
-      ui.gap(content, wide ? 4 : 2);
-      TextView label = ui.text(n[2], wide ? 13 : 12, page.equals(n[0]));
-      label.setTextColor(page.equals(n[0]) ? skin.primary : skin.ink);
-      label.setGravity(Gravity.CENTER);
-      content.addView(label);
-      item.addView(content, new FrameLayout.LayoutParams(-1, -1));
-      if (wide && page.equals(n[0])) {
-        View mark = new View(this);
-        mark.setBackground(ui.bg(skin.accent, 2, false));
-        FrameLayout.LayoutParams pos = new FrameLayout.LayoutParams(
-          ui.dp(3),
-          ui.dp(26),
-          Gravity.LEFT | Gravity.CENTER_VERTICAL
-        );
-        pos.leftMargin = ui.dp(2);
-        item.addView(mark, pos);
-      }
-      item.setContentDescription(n[2]);
+      boolean selected = page.equals(n[0]) || (n[0].equals("more") && page.equals("rules"));
+      LinearLayout item = ui.col();
+      item.setGravity(Gravity.CENTER);
+      item.setSelected(selected);
+      item.setBackground(ui.bg(selected ? skin.soft : Color.TRANSPARENT, 14, false));
+      item.addView(new NavigationIconView(this, skin, n[0]), ui.lp(26, 26));
+      ui.gap(item, 3);
+      String label = n[1];
+      if (n[0].equals("review") && data != null && array(data, "reviews").length() > 0) label += " " + array(data, "reviews").length();
+      TextView text = ui.text(label, 11, selected);
+      text.setTextColor(selected ? skin.primary : skin.muted);
+      text.setGravity(Gravity.CENTER);
+      item.addView(text);
+      item.setContentDescription(n[1]);
       item.setFocusable(true);
-      item.setOnClickListener(v -> {
-        v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-        navigate(n[0]);
-      });
-      item.setAccessibilityDelegate(
-        new View.AccessibilityDelegate() {
-          @Override
-          public void onInitializeAccessibilityNodeInfo(
-            View host,
-            android.view.accessibility.AccessibilityNodeInfo info
-          ) {
-            super.onInitializeAccessibilityNodeInfo(host, info);
-            info.setClassName("android.widget.Button");
-          }
-        }
-      );
-      if (wide) {
-        ui.add(nav, item, compact() ? 58 : parent() ? 78 : 104);
-        ui.gap(nav, compact() ? 4 : 12);
-      } else {
-        nav.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
-        ui.gap(nav, 4);
-      }
+      item.setOnClickListener(v -> { v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); navigate(n[0]); });
+      if (wide) { ui.add(nav, item, 72); ui.gap(nav, 8); }
+      else nav.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
     }
     return nav;
+  }
+
+  private void more(LinearLayout main) {
+    title(main, "更多", null);
+    LinearLayout list = ui.col();
+    if (parent() && !admin()) {
+      ui.add(list, ui.label("任务管理"), -2); ui.gap(list, 10);
+      moreItem(list, "BookOpen", "任务规则", "科目、星星、每日次数与安排", () -> navigate("rules"));
+      moreItem(list, "Nfc", "碰卡发星", "亮屏解锁后碰卡即可自动到账", () -> showTaskCardReader(null, null));
+      moreItem(list, "Nfc", "制作任务卡", "选择任务，将它写入一张空白卡", () -> navigate("rules"));
+      moreItem(list, "ScanLine", "检测卡片", "核对孩子、任务与今日使用状态", this::showTaskCardInspection);
+      ui.gap(list, 14);
+    }
+    ui.add(list, ui.label("偏好与账号"), -2); ui.gap(list, 10);
+    moreItem(list, "Palette", "主题换装", "选择喜欢的颜色和探险伙伴", this::skins);
+    moreItem(list, "ShieldCheck", "账号与设置", "密码、设备方向和 NFC 唤起设置", this::settings);
+    ui.gap(list, 12);
+    ui.add(list, ui.label("星星岛 · " + BuildConfig.VERSION_NAME), -2);
+    ui.grow(main, region(list, "more"));
+  }
+
+  private void moreItem(LinearLayout list, String icon, String title, String detail, Runnable action) {
+    LinearLayout row = ui.row(); ui.pad(row, 14);
+    row.setBackground(ui.bg(skin.surface, 16, true));
+    row.addView(ui.iconBox(icon, 21), ui.lp(40, 40)); ui.gap(row, 12);
+    LinearLayout copy = ui.col();
+    ui.add(copy, ui.text(title, 16, true), -2); ui.gap(copy, 5);
+    TextView note = ui.label(detail); note.setTextSize(11); ui.add(copy, note, -2);
+    row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+    row.addView(new NavigationIconView(this, skin, "ChevronRight"), ui.lp(18, 18));
+    row.setContentDescription(title); row.setFocusable(true); row.setOnClickListener(v -> action.run());
+    ui.add(list, row, -2); ui.gap(list, 8);
   }
 
   private android.text.TextWatcher watch(Pick pick) {
@@ -707,7 +724,7 @@ public class MainActivity extends AppCompatActivity {
     ui.pad(outer, wide ? 32 : 20);
     root.addView(outer, new FrameLayout.LayoutParams(-1, -1));
     if (wide) {
-      outer.addView(new ArtView(this, skin.hero()), new LinearLayout.LayoutParams(0, -1, 1));
+      outer.addView(new ArtView(this, "island-v2/star-mascot.png").fit(), new LinearLayout.LayoutParams(0, -1, 1));
       ui.gap(outer, 32);
     }
     LinearLayout form = ui.card();
@@ -790,18 +807,34 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private LinearLayout hero() {
-    LinearLayout hero = ui.col();
-    hero.setBackground(ui.bg(skin.surface, 24, true));
-    ui.pad(hero, 12);
-    ui.add(hero, ui.text(skin.title, 23, true), -2);
-    ui.gap(hero, 8);
-    ui.add(hero, ui.label("✦ " + skin.subtitle + " ✦"), -2);
-    ui.gap(hero, 12);
-    CompanionView art = new CompanionView(this, skin);
-    ui.grow(hero, art);
-    ui.gap(hero, 10);
-    ui.add(hero, new JourneyView(this, skin), 148);
-    return hero;
+    LinearLayout panel = ui.col();
+    if (parent()) {
+      LinearLayout pending = ui.card();
+      ui.add(pending, ui.text("待确认 · " + array(data, "reviews").length(), 18, true), -2); ui.gap(pending, 12);
+      JSONArray reviews = array(data, "reviews");
+      for (int i = 0; i < Math.min(3, reviews.length()); i++) {
+        JSONObject review = obj(reviews, i); LinearLayout row = ui.row();
+        row.addView(ui.iconBox(subjectIcon(review.optString("subject")), 20), ui.lp(38, 38)); ui.gap(row, 10);
+        LinearLayout copy = ui.col(); TextView label = ui.text(review.optString("title"), 14, true); ui.ellipsis(label, 2);
+        ui.add(copy, label, -2); ui.gap(copy, 4); ui.add(copy, ui.label(review.optInt("stars") + " 星"), -2);
+        row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1)); ui.add(pending, row, -2); ui.gap(pending, 14);
+      }
+      if (reviews.length() == 0) { ui.line(pending, "都确认好啦"); ui.add(pending, ui.label("孩子的新提交会出现在这里"), -2); ui.gap(pending, 12); }
+      ui.add(pending, ui.button("查看全部", false, () -> navigate("review")), 44);
+      ui.add(panel, pending, -2); ui.gap(panel, 16);
+    }
+    LinearLayout companion = ui.card(); companion.setGravity(Gravity.CENTER);
+    companion.setBackground(ui.bg(skin.soft, 20, false));
+    ArtView art = new ArtView(this, "island-v2/star-mascot.png").fit(); ui.add(companion, art, 150);
+    ui.add(companion, ui.text(skin.title, 18, true), -2); ui.gap(companion, 8);
+    ui.add(companion, ui.label("每一份努力，都值得被看见"), -2);
+    companion.setOnClickListener(v -> toast("你努力的样子，闪闪发光！")); companion.setContentDescription("和星星伙伴打招呼");
+    ui.add(panel, companion, -2);
+    return panel;
+  }
+
+  private String subjectIcon(String key) {
+    return key.equals("chinese") ? "BookOpen" : key.equals("math") ? "Calculator" : key.equals("english") ? "Languages" : key.equals("sports") ? "Dumbbell" : "Shapes";
   }
 
   private LinearLayout earnedBadge() {
@@ -826,113 +859,64 @@ public class MainActivity extends AppCompatActivity {
   private void daily(LinearLayout main) {
     LinearLayout layout = wide ? ui.row() : ui.col();
     ui.grow(main, layout);
-    if (wide && heightDp() > 520) {
-      layout.addView(hero(), new LinearLayout.LayoutParams(0, -1, .32f));
-      ui.gap(layout, 16);
+    LinearLayout tasks = ui.col(); tasks.setTag("daily-panel");
+    layout.addView(tasks, new LinearLayout.LayoutParams(wide ? 0 : -1, wide ? -1 : 0, 1));
+    LinearLayout overview = ui.row();
+    overview.setBackground(ui.bg(skin.surface, 22, true));
+    overview.setPadding(ui.dp(14), ui.dp(10), ui.dp(14), ui.dp(10));
+    String[][] stats = { {date.equals(data.optString("today")) ? "今日已获得" : "当日已获得", "" + data.optInt("dayEarned") + " 星"}, {"已完成", sum(array(data, "tasks"), "approved") + " 次"}, {"待确认", sum(array(data, "tasks"), "pending") + " 次"} };
+    for (String[] stat : stats) {
+      LinearLayout block = ui.col();
+      ui.add(block, ui.label(stat[0]), -2); ui.gap(block, 5);
+      ui.add(block, ui.text(stat[1], 21, true), -2);
+      overview.addView(block, new LinearLayout.LayoutParams(0, -2, 1));
     }
-    LinearLayout tasks = ui.col();
-    tasks.setTag("daily-panel");
-    layout.addView(
-      tasks,
-      new LinearLayout.LayoutParams(wide ? 0 : -1, wide ? -1 : 0, wide ? .68f : 1)
-    );
-    if (!wide || widthDp() < 900) {
-      ui.add(tasks, earnedBadge(), 48);
-      ui.gap(tasks, 8);
-    }
-    dateStrip(tasks);
-    subjectStrip(tasks);
-    ui.gap(tasks, 6);
+    overview.setTag("daily-earned");
+    ui.add(tasks, overview, wide ? 64 : 72); ui.gap(tasks, 10);
+    LinearLayout taskHeading = ui.row();
+    taskHeading.addView(new NavigationIconView(this, skin, "ClipboardCheck"), ui.lp(18, 18)); ui.gap(taskHeading, 7);
+    taskHeading.addView(ui.text("今天的小任务", 18, true)); ui.add(tasks, taskHeading, wide ? 28 : 32);
+    dateStrip(tasks); subjectStrip(tasks); ui.gap(tasks, 6);
     JSONArray selected = new JSONArray();
     for (int i = 0; i < array(data, "tasks").length(); i++) {
       JSONObject task = obj(array(data, "tasks"), i);
-      if (task.optString("subject", "other").equals(subject)) selected.put(
-        task
-      );
+      if (subject.equals("all") || task.optString("subject", "other").equals(subject)) selected.put(task);
     }
-    ScrollView scroll = new ScrollView(this);
-    taskScroller = scroll;
-    scroll.setTag("task-scroll");
-    scroll.setFillViewport(true);
-    scroll.setVerticalScrollBarEnabled(true);
-    scroll.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
-    scroll.setClipToPadding(false);
-    scroll.setPadding(0, 0, ui.dp(5), 0);
-    LinearLayout grid = ui.col();
-    grid.setTag("task-grid");
-    int cols = wide || widthDp() >= 600 ? 2 : 1;
-    int cardHeight = Math.round(190 * Math.max(1, getResources().getConfiguration().fontScale));
-    if (selected.length() == 0) ui.add(grid, center("这个科目还没有安排任务"), 180);
+    ScrollView scroll = new ScrollView(this); taskScroller = scroll;
+    scroll.setTag("task-scroll"); scroll.setFillViewport(true); scroll.setClipToPadding(false);
+    LinearLayout grid = ui.col(); grid.setTag("task-grid");
+    int availableWidth = widthDp() - (wide ? 148 : 28) - (wide && widthDp() >= 1080 ? 276 : 0);
+    int cols = availableWidth >= 660 ? 2 : 1;
+    int cardHeight = Math.round(98 * Math.max(1, getResources().getConfiguration().fontScale));
+    if (selected.length() == 0) ui.add(grid, center("这个科目还没有安排任务"), 150);
     for (int start = 0; start < selected.length(); start += cols) {
       LinearLayout row = ui.row();
       for (int c = 0; c < cols; c++) {
-        if (start + c < selected.length()) row.addView(
-          taskCard(obj(selected, start + c)),
-          new LinearLayout.LayoutParams(0, -1, 1)
-        );
-        else row.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 1));
-        if (c < cols - 1) ui.gap(row, 12);
+        row.addView(start + c < selected.length() ? taskCard(obj(selected, start + c)) : new View(this), new LinearLayout.LayoutParams(0, -1, 1));
+        if (c < cols - 1) ui.gap(row, 10);
       }
-      ui.add(grid, row, cardHeight);
-      if (start + cols < selected.length()) ui.gap(grid, 12);
+      ui.add(grid, row, cardHeight); ui.gap(grid, 10);
     }
-    scroll.addView(grid, new ScrollView.LayoutParams(-1, -2));
-    ui.grow(tasks, scroll);
+    scroll.addView(grid, new ScrollView.LayoutParams(-1, -2)); ui.grow(tasks, scroll);
     final int restoreY = taskScrollY;
-    scroll.setOnScrollChangeListener((v, x, y, oldX, oldY) -> {
-      if (taskScroller == scroll) taskScrollY = y;
-    });
-    scroll.post(() -> {
-      if (taskScroller == scroll) scroll.scrollTo(0, restoreY);
-    });
+    scroll.setOnScrollChangeListener((v, x, y, oldX, oldY) -> { if (taskScroller == scroll) taskScrollY = y; });
+    scroll.post(() -> { if (taskScroller == scroll) scroll.scrollTo(0, restoreY); });
+    if (wide && widthDp() >= 1080 && heightDp() >= 540) {
+      ui.gap(layout, 20); layout.addView(hero(), ui.lp(256, -1));
+    } else if (wide && !parent() && heightDp() >= 540) {
+      ui.gap(layout, 16); layout.addView(hero(), ui.lp(210, -1));
+    }
   }
 
   private void dateStrip(LinearLayout box) {
-    LinearLayout row = ui.row();
-    row.setTag("date-strip");
-    if (wide && !compact()) {
-      TextView heading = ui.text("今日任务", 19, true);
-      row.addView(heading);
-      ui.gap(row, 14);
-    }
-
-    row.addView(
-      ui.button("‹", false, () -> {
-        date = shift(date, -1);
-        taskScrollY = 0;
-        refresh(true);
-      })
-    );
-    ui.gap(row, 8);
-    TextView d = ui.button(date + (date.equals(today()) ? " · 今天" : ""), false, () ->
-      chooseDate(date, next -> {
-        date = next;
-        taskScrollY = 0;
-        refresh(true);
-      })
-    );
-    row.addView(d, new LinearLayout.LayoutParams(0, ui.dp(48), 1));
-    ui.gap(row, 8);
-    row.addView(
-      ui.button("›", false, () -> {
-        date = shift(date, 1);
-        taskScrollY = 0;
-        refresh(true);
-      })
-    );
-    ui.gap(row, 8);
-    row.addView(
-      ui.button("今天", false, () -> {
-        date = today();
-        taskScrollY = 0;
-        refresh(true);
-      })
-    );
-    if (parent()) {
-      ui.gap(row, 8);
-      row.addView(ui.button("＋", true, () -> ruleForm(null, false)));
-    }
-    ui.add(box, row, compact() ? 48 : 56);
+    LinearLayout row = ui.row(); row.setTag("date-strip");
+    row.addView(ui.button("‹", false, () -> { date = shift(date, -1); taskScrollY = 0; refresh(true); }), ui.lp(44, 44));
+    ui.gap(row, 6);
+    TextView day = ui.button(date + (date.equals(today()) ? " · 今天" : ""), false, () -> chooseDate(date, next -> { date = next; taskScrollY = 0; refresh(true); }));
+    row.addView(day, new LinearLayout.LayoutParams(0, ui.dp(44), 1)); ui.gap(row, 6);
+    row.addView(ui.button("›", false, () -> { date = shift(date, 1); taskScrollY = 0; refresh(true); }), ui.lp(44, 44));
+    if (!date.equals(today())) { ui.gap(row, 6); row.addView(ui.button("今天", false, () -> { date = today(); taskScrollY = 0; refresh(true); }), ui.lp(-2, 44)); }
+    ui.add(box, row, 48);
   }
 
   private interface Pick {
@@ -953,91 +937,49 @@ public class MainActivity extends AppCompatActivity {
   private void subjectStrip(LinearLayout box) {
     LinearLayout row = ui.row();
     row.setTag("subject-strip");
-    String[] keys = SUBJECTS, labels = LABELS;
+    String[] keys = page.equals("rules") ? SUBJECTS : new String[] {"all", "chinese", "math", "english", "sports", "other"};
+    String[] labels = page.equals("rules") ? LABELS : new String[] {"全部", "语文", "数学", "英语", "体育", "其他"};
     for (int i = 0; i < keys.length; i++) {
       String key = keys[i];
-      TextView b = ui.button(labels[i], subject.equals(key), () -> {
+      TextView b = ui.button(labels[i], false, () -> {
         subject = key;
         taskScrollY = 0;
+        if (page.equals("rules")) regionOffsets.remove("rules:" + childId);
         render();
       });
       b.setTextSize(14);
+      b.setBackgroundColor(Color.TRANSPARENT); b.setTextColor(subject.equals(key) ? skin.primary : skin.muted);
+      if (subject.equals(key)) { android.graphics.drawable.LayerDrawable underline = new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{ui.bg(Color.TRANSPARENT, 0, false), ui.bg(skin.primary, 2, false)}); underline.setLayerGravity(1, Gravity.BOTTOM); underline.setLayerHeight(1, ui.dp(3)); underline.setLayerInset(1, ui.dp(12), 0, ui.dp(12), 0); b.setBackground(underline); }
       b.setPadding(0, ui.dp(6), 0, ui.dp(6));
-      row.addView(b, new LinearLayout.LayoutParams(0, ui.dp(48), 1));
+      row.addView(b, new LinearLayout.LayoutParams(0, ui.dp(44), 1));
       if (i < keys.length - 1) ui.gap(row, 5);
     }
-    ui.add(box, row, 54);
+    ui.add(box, row, 48);
   }
 
   private LinearLayout taskCard(JSONObject t) {
-    LinearLayout card = ui.card();
-    ui.pad(card, compact() ? 12 : 16);
-    LinearLayout top = ui.row();
-    int h = heightDp();
-    ArtView image = new ArtView(this, "subjects/" + t.optString("subject", "other") + ".webp");
-    top.addView(image, ui.lp(h < 510 ? 48 : h < 560 ? 62 : 82, h < 510 ? 48 : h < 560 ? 62 : 82));
-    ui.gap(top, 12);
+    LinearLayout card = ui.row(); ui.pad(card, 12); card.setBackground(ui.bg(skin.surface, 16, true));
+    String subjectKey = t.optString("subject", "other");
+    LinearLayout icon = ui.iconBox(subjectIcon(subjectKey), 21);
+    if (subjectKey.equals("math")) icon.setBackground(ui.bg(0xFFFFF3D9, 12, false));
+    else if (subjectKey.equals("english")) icon.setBackground(ui.bg(0xFFFBEAF3, 12, false));
+    else if (subjectKey.equals("sports")) icon.setBackground(ui.bg(0xFFE7F4FA, 12, false));
+    card.addView(icon, ui.lp(40, 40)); ui.gap(card, 10);
     LinearLayout copy = ui.col();
-
-    TextView title = ui.text(t.optString("title"), 18, true);
-    ui.ellipsis(title, compact() ? 1 : 2);
-    title.setOnClickListener(v -> taskDetail(t));
-    ui.add(copy, title, -2);
-    ui.gap(copy, 10);
-    ui.add(copy, ui.label(subjectName(t) + " · 每次 " + t.optInt("stars") + " 星"), -2);
-    ui.gap(copy, 8);
-    ui.add(copy, ui.label("每天最多 " + t.optInt("daily_limit") + " 次 · 家长可调整发放"), -2);
-    top.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
-    ui.grow(card, top);
-    ui.gap(card, compact() ? 4 : 8);
-    LinearLayout bottom = ui.row();
-    int approved = t.optInt("approved"),
-      pending = t.optInt("pending"),
-      limit = t.optInt("daily_limit");
-    StarView progress = new StarView(this, skin, 1, approved, pending, limit);
-    bottom.addView(progress, new LinearLayout.LayoutParams(0, ui.dp(48), 1));
-    ui.gap(bottom, 6);
-    boolean available =
-      approved + pending < limit &&
-      date.compareTo(data.optString("today")) <= 0 &&
-      (parent() || date.equals(data.optString("today")));
-    TextView done = ui.button(
-      approved >= limit
-        ? "完成啦 ✓"
-        : pending + approved >= limit
-          ? "等待确认"
-          : parent()
-            ? "代为完成"
-            : "我完成啦",
-      available,
-      () -> taskDetail(t)
-    );
-    done.setEnabled(!busy);
-    done.setOnTouchListener((v, event) -> {
-      if (SparkleView.motionEnabled()) {
-        boolean down = event.getActionMasked() == MotionEvent.ACTION_DOWN;
-        if (
-          down ||
-          event.getActionMasked() == MotionEvent.ACTION_UP ||
-          event.getActionMasked() == MotionEvent.ACTION_CANCEL
-        ) {
-          v.animate()
-            .scaleX(down ? .93f : 1)
-            .scaleY(down ? .93f : 1)
-            .setDuration(down ? 90 : 220)
-            .setInterpolator(new android.view.animation.OvershootInterpolator(2));
-        }
-      }
-      return false;
-    });
-    done.setTag("task-action");
-    bottom.addView(done);
-    ui.add(card, bottom, 48);
-    card.setOnClickListener(v -> taskDetail(t));
+    int approved = t.optInt("approved"), pending = t.optInt("pending"), limit = t.optInt("daily_limit");
+    InlineTaskTitle titleRow = new InlineTaskTitle(ui, t.optString("title"), approved, limit);
+    ui.add(copy, titleRow, -2); ui.gap(copy, 6);
+    TextView meta = ui.label("每次 " + t.optInt("stars") + " 星" + (pending > 0 ? " · " + pending + " 次待确认" : "")); meta.setTextSize(12); ui.add(copy, meta, -2);
+    card.addView(copy, new LinearLayout.LayoutParams(0, -2, 1)); ui.gap(card, 8);
+    boolean available = approved + pending < limit && date.compareTo(data.optString("today")) <= 0 && (parent() || date.equals(data.optString("today")));
+    TextView done = ui.button(approved >= limit ? "已完成 ✓" : pending + approved >= limit ? "等待确认" : parent() ? "确认完成" : "我完成啦", available, () -> taskDetail(t));
+    done.setTextSize(13); done.setPadding(ui.dp(10), 0, ui.dp(10), 0); done.setEnabled(!busy); done.setTag("task-action");
+    card.addView(done, ui.lp(-2, 44)); card.setOnClickListener(v -> taskDetail(t)); card.setFocusable(true);
     return card;
   }
 
   private AlertDialog dialog(String title, LinearLayout content, String action, Runnable onAction) {
+    if (page.equals("cards") || page.equals("card-inspect")) taskCards.stop();
     closeDialog();
     ScrollView scroll = ui.scroll(content);
     LinearLayout heading = ui.row();
@@ -1059,8 +1001,14 @@ public class MainActivity extends AppCompatActivity {
     activeDialog = d;
     d.setOnDismissListener(v -> {
       if (activeDialog == d) activeDialog = null;
+      if (nfcDialog == d) {
+        nfcDialog = null;
+        taskCards.stop();
+      }
+      handler.post(this::startCardScanning);
     });
     d.setOnShowListener(v -> {
+      if (d.getWindow() != null) d.getWindow().setBackgroundDrawable(ui.bg(skin.surface, 24, true));
       resizeDialog(d);
       if (action != null) {
         android.widget.Button confirm = d.getButton(AlertDialog.BUTTON_POSITIVE);
@@ -1257,6 +1205,325 @@ public class MainActivity extends AppCompatActivity {
     return s.equals("approved") ? "已通过" : s.equals("rejected") ? "已退回" : "等待确认";
   }
 
+  private void showTaskCardReader(TaskCardId write, String summary) {
+    if (!parent() || busy) return;
+    if (!ensureTaskCardNfc()) return;
+    LinearLayout f = form();
+    if (write == null) {
+      closeDialog();
+      taskCards.stop();
+      inspectionVersion++;
+      page = "cards";
+      cardStatus = "";
+      error = "";
+      loadCardReceipt();
+      render();
+      startCardScanning();
+      return;
+    }
+    ui.add(f, ui.text(summary, 18, true), -2);
+    ui.gap(f, 12);
+    ui.line(f, "准备一张可写的 NDEF 空白卡，点击开始后贴近手机背面的 NFC 感应区。");
+    ui.line(f, "卡片可每天重复使用。以后修改名称或星星，无需重写卡片。请在卡面标注孩子和任务名称。");
+    TextView status = ui.text("等待开始写卡", 16, true);
+    ui.add(f, status, -2);
+    final AlertDialog[] reader = new AlertDialog[1];
+    Runnable start = () -> {
+      status.setText("请保持空白卡贴近手机，正在等待写入…");
+      reader[0].getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+      taskCards.start(write, new NfcTaskCards.Callback() {
+        public void read(TaskCardId card, String cardUid) { openTaskCard(card, cardUid); }
+        public void written() {
+          closeDialog();
+          LinearLayout success = form();
+          ui.add(success, ui.text(summary, 18, true), -2);
+          ui.line(success, "写入并校验成功。可以先检测绑定信息；进入碰卡发星后，再碰卡会直接确认今日任务并发星。");
+          dialog("任务卡制作成功", success, "检测这张卡 · 不发星", MainActivity.this::showTaskCardInspection);
+        }
+        public void error(String message) {
+          status.setText(message);
+          reader[0].getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
+        }
+      });
+    };
+    reader[0] = dialog("制作 NFC 任务卡", f, "开始写卡", start);
+    nfcDialog = reader[0];
+  }
+
+  private boolean ensureTaskCardNfc() {
+    LinearLayout f = form();
+    if (!taskCards.supported()) {
+      ui.line(f, "这台设备没有 NFC。请用支持 NFC 的安卓手机登录同一个家长账号，再制作或确认任务卡。");
+      dialog("需要支持 NFC 的手机", f, null, null);
+      return false;
+    }
+    if (!taskCards.enabled()) {
+      ui.line(f, "打开手机 NFC 后，回到这里重新碰卡。");
+      dialog("请打开 NFC", f, "打开 NFC 设置", () -> {
+        closeDialog();
+        try { startActivity(new Intent(Settings.ACTION_NFC_SETTINGS)); }
+        catch (ActivityNotFoundException e) { toast("请在手机系统设置中打开 NFC"); }
+      });
+      return false;
+    }
+    return true;
+  }
+
+  private void showTaskCardInspection() {
+    if (!parent() || busy || !ensureTaskCardNfc()) return;
+    closeDialog();
+    taskCards.stop();
+    inspectionVersion++;
+    page = "card-inspect";
+    inspectedCard = null;
+    inspectionMessage = "等待任务卡…";
+    error = "";
+    effects.removeAllViews();
+    render();
+    startCardScanning();
+  }
+
+  private void cardInspection(LinearLayout main) {
+    LinearLayout content = ui.col();
+    LinearLayout heading = ui.row();
+    heading.addView(ui.text("检测任务卡", 24, true), new LinearLayout.LayoutParams(0, -2, 1));
+    heading.addView(ui.button("返回任务", false, () -> navigate("today")));
+    ui.add(content, heading, 52);
+    ui.gap(content, 16);
+    LinearLayout instructions = ui.card();
+    ui.add(instructions, ui.text("仅检测 · 不发星", 22, true), -2);
+    ui.line(instructions, "把一张卡贴近手机背面，查看绑定的孩子和任务。检测不会记录完成、审核任务或改写卡片。");
+    ui.add(instructions, ui.text(inspectionMessage, 18, true), -2);
+    ui.add(content, instructions, -2);
+    if (inspectedCard != null) {
+      JSONObject c = inspectedCard.optJSONObject("child");
+      JSONObject rule = inspectedCard.optJSONObject("rule");
+      ui.gap(content, 16);
+      LinearLayout result = ui.card();
+      ui.add(result, ui.label("这张卡绑定的任务"), -2);
+      ui.gap(result, 12);
+      String label = c.optString("name") + " · " + subjectName(rule) + " · " + rule.optString("title");
+      TextView binding = ui.text(label, 24, true);
+      binding.setTextIsSelectable(true);
+      ui.add(result, binding, -2);
+      ui.line(result, "建议把以上名称写在卡面，避免混淆。");
+      if (c.optInt("active", 1) == 0) ui.line(result, "这个孩子的账号已停用。");
+      ui.line(result, "最新规则：" + (rule.optInt("enabled") == 1 ? "启用" : "停用") + " · " + rule.optString("effective_from") + " 起生效");
+      JSONObject todayTask = inspectedCard.optJSONObject("today_task");
+      if (todayTask == null && inspectedCard.optBoolean("scheduled_today")) todayTask = inspectedCard.optJSONObject("today_rule");
+      if (todayTask == null) ui.line(result, "今天未安排这项任务，卡片仍然可以正常检测。");
+      else {
+        ui.line(result, "今日任务：" + subjectName(todayTask) + " · " + todayTask.optString("title"));
+        ui.line(result, "今日每次 " + todayTask.optInt("stars") + " 星 · 每日最多 " + todayTask.optInt("daily_limit") + " 次");
+      }
+      ui.line(result, "任务编号：" + rule.optString("rule_key"));
+      if (!inspectedCard.isNull("card_uid")) {
+        ui.line(result, "实体卡编号：" + inspectedCard.optString("card_uid"));
+        ui.add(result, ui.text(inspectedCard.optBoolean("claimed_today") ? "这张卡今天已确认过，不能重复发星" : "这张卡今天尚未发星", 18, true), -2);
+      }
+      ui.add(content, result, -2);
+    }
+    ui.gap(content, 14);
+    ui.line(content, "移开这张卡，再碰下一张即可继续检测。检测需要联网查询任务名称。");
+    ui.grow(main, ui.scroll(content));
+    handler.post(this::startCardScanning);
+  }
+
+  // A separate read-only route is used even when today's task has not been materialized.
+  void inspectTaskCard(TaskCardId card, String cardUid) {
+    if (!parent() || busy) return;
+    if (!page.equals("card-inspect")) taskCards.stop();
+    page = "card-inspect";
+    inspectedCard = null;
+    inspectionMessage = "正在查询这张卡的绑定信息…";
+    error = "";
+    effects.removeAllViews();
+    int version = ++inspectionVersion;
+    String owner = user.optString("id");
+    render();
+    async(() -> {
+      try { return api.get("/api/children/" + card.childId + "/task-cards/" + card.ruleKey + "?card_uid=" + Uri.encode(cardUid)); }
+      catch (Exception e) { return e; }
+    }, result -> {
+      if (!resumed || !page.equals("card-inspect") || version != inspectionVersion || user == null || !owner.equals(user.optString("id"))) return;
+      if (result instanceof StarApi.ApiException && ((StarApi.ApiException) result).status == 401) { logoutLocal(); return; }
+      if (result instanceof Exception) {
+        inspectionMessage = ((Exception) result).getMessage();
+        if (inspectionMessage == null) inspectionMessage = "查询失败，请检查网络后重新碰卡";
+      } else {
+        inspectedCard = (JSONObject) result;
+        inspectionMessage = "已识别任务卡 · 本次没有发星";
+      }
+      render();
+    }, false);
+  }
+
+  private void loadCardReceipt() {
+    lastCardReceipt = null;
+    if (user == null) return;
+    try {
+      String saved = getPreferences(0).getString("card-receipt:" + user.optString("id"), "");
+      if (!saved.isEmpty()) lastCardReceipt = new JSONObject(saved);
+    } catch (JSONException ignored) {}
+  }
+
+  private void saveCardReceipt() {
+    if (user != null && lastCardReceipt != null)
+      getPreferences(0).edit().putString("card-receipt:" + user.optString("id"), lastCardReceipt.toString()).apply();
+  }
+
+  private void cards(LinearLayout main) {
+    LinearLayout content = ui.col();
+    LinearLayout heading = ui.row();
+    heading.addView(ui.text("碰任务卡", 24, true), new LinearLayout.LayoutParams(0, -2, 1));
+    heading.addView(ui.button("返回任务", false, () -> navigate("today")));
+    ui.add(content, heading, 52); ui.gap(content, 10);
+    if (lastCardReceipt == null) loadCardReceipt();
+    JSONObject entry = lastCardReceipt == null ? null : lastCardReceipt.optJSONObject("entry");
+    if (entry != null) {
+      JSONObject receipt = lastCardReceipt;
+      LinearLayout recent = ui.card(); recent.setGravity(Gravity.CENTER_HORIZONTAL);
+      ui.add(recent, new ArtView(this, "island-v2/star-mascot.png").fit(), 135);
+      TextView arrived = ui.text(receipt.optBoolean("already_claimed") ? "这张卡今天已确认" : "星星到账啦", 23, true); arrived.setGravity(Gravity.CENTER); ui.add(recent, arrived, -2); ui.gap(recent, 10);
+      TextView amount = ui.text("本次积分 " + entry.optInt("amount") + " 颗星星", 28, true); amount.setGravity(Gravity.CENTER); amount.setTextColor(skin.primary); ui.add(recent, amount, -2); ui.gap(recent, 14);
+      TextView summary = ui.text(cardSummary(receipt), 16, true); summary.setGravity(Gravity.CENTER); ui.add(recent, summary, -2); ui.gap(recent, 7);
+      ui.add(recent, ui.label("最近一次到账 · " + receipt.optJSONObject("task").optString("date")), -2); ui.gap(recent, 12);
+      if (!cardStatus.isEmpty()) { TextView status = ui.text(cardStatus, 14, true); status.setGravity(Gravity.CENTER); ui.add(recent, status, -2); ui.gap(recent, 12); }
+      ui.add(recent, ui.button("继续碰卡", true, () -> { startCardScanning(); toast("请移开上一张卡，将下一张卡贴近手机"); }), 48); ui.gap(recent, 10);
+      boolean current = true;
+      for (int i = 0; i < array(data, "ledger").length(); i++) {
+        JSONObject live = obj(array(data, "ledger"), i);
+        if (live.optString("id").equals(entry.optString("id"))) current = editableAward(live);
+      }
+      if (current) ui.add(recent, ui.button("修改本次积分", false, () -> adjustLedgerStars(entry, cardSummary(receipt))), 48);
+      else ui.line(recent, "这笔到账已修改或撤销，请到星星账本查看最新记录。");
+      ui.gap(recent, 12);
+      TextView detail = ui.label("完成 " + receipt.optJSONObject("submission").optInt("quantity", 1) + " 次 · 修改只影响本次到账"); detail.setTextSize(11); detail.setGravity(Gravity.CENTER); ui.add(recent, detail, -2);
+      if (receipt.has("card_uid")) { ui.gap(recent, 8); TextView uid = ui.label("实体卡编号：" + receipt.optString("card_uid")); uid.setTextSize(10); uid.setGravity(Gravity.CENTER); ui.add(recent, uid, -2); }
+      ui.add(content, recent, -2);
+    } else {
+      LinearLayout reader = ui.card();
+      ui.add(reader, new ArtView(this, "island-v2/nfc-tap.png").fit(), 170);
+      ui.add(reader, ui.text(busy ? "正在确认，请稍候…" : "把任务卡贴近手机背面", 22, true), -2); ui.gap(reader, 12);
+      ui.line(reader, "碰卡自动到账，可接着碰下一张。每张卡每天确认一次，多次完成使用多张卡。");
+      if (!cardStatus.isEmpty()) ui.add(reader, ui.text(cardStatus, 18, true), -2);
+      ui.add(content, reader, -2);
+    }
+    ui.gap(content, 12);
+    ui.add(content, ui.button("检测卡片 · 不发星", false, this::showTaskCardInspection), 48); ui.gap(content, 8);
+    ui.add(content, ui.button("查看星星账本", false, () -> navigate("wallet")), 48);
+    ui.grow(main, ui.scroll(content));
+    handler.post(this::startCardScanning);
+  }
+
+  private String cardSummary(JSONObject receipt) {
+    JSONObject task = receipt.optJSONObject("task");
+    return receipt.optJSONObject("child").optString("name") + " · " + subjectName(task) + " · " + task.optString("title");
+  }
+
+  private void startCardScanning() {
+    boolean inspect = page.equals("card-inspect");
+    if (taskCards == null || !resumed || !parent() || (!page.equals("cards") && !inspect) || busy || activeDialog != null || taskCards.active() || !taskCards.enabled()) return;
+    taskCards.startContinuousRead(new NfcTaskCards.Callback() {
+      public void read(TaskCardId card, String cardUid) {
+        if (inspect && page.equals("card-inspect")) inspectTaskCard(card, cardUid);
+        else if (!inspect && page.equals("cards")) openTaskCard(card, cardUid);
+      }
+      public void written() {}
+      public void error(String message) {
+        if (inspect && page.equals("card-inspect")) {
+          inspectionVersion++;
+          inspectedCard = null;
+          inspectionMessage = message;
+          render();
+        } else toast(message);
+      }
+    });
+  }
+
+  // Isolated UI tests use this entry; NFC radio is verified with a physical card.
+  void openTaskCard(TaskCardId card, String cardUid) {
+    if (!parent() || page.equals("card-inspect")) return;
+    if (busy) { toast("上一张卡正在处理中，请移开后重新碰卡"); return; }
+    boolean allowed = false;
+    for (int i = 0; i < children.length(); i++)
+      if (card.childId.equals(obj(children, i).optString("id"))) allowed = true;
+    closeDialog();
+    page = "cards";
+    error = "";
+    cardStatus = "";
+    if (!allowed) {
+      error = "这张卡不属于当前账号可管理的孩子，请检查当前登录的家长账号";
+      render();
+      return;
+    }
+    requestVersion++;
+    async(() -> api.call("/api/children/" + card.childId + "/task-cards/claim", "POST",
+      json("rule_key", card.ruleKey, "date", today(), "card_uid", cardUid), true), result -> {
+      JSONObject receipt = (JSONObject) result;
+      lastCardReceipt = receipt;
+      saveCardReceipt();
+      childId = receipt.optJSONObject("child").optString("id");
+      date = receipt.optJSONObject("task").optString("date");
+      subject = receipt.optJSONObject("task").optString("subject", "other");
+      taskScrollY = 0;
+      error = "";
+      boolean duplicate = receipt.optBoolean("already_claimed");
+      cardStatus = duplicate ? "这张卡今天已确认，未重复发星" : "本次已确认，换下一张卡即可";
+      render();
+      refresh(false);
+      if (duplicate) { effects.removeAllViews(); toast(cardStatus); }
+      else celebrate("已到账 " + receipt.optJSONObject("entry").optInt("amount") + " 颗星星", cardSummary(receipt));
+    }, true);
+    render();
+  }
+
+  private boolean editableAward(JSONObject entry) {
+    return entry.optInt("amount") > 0 && entry.isNull("reversed_by") &&
+      (entry.optString("kind").equals("task") || (entry.optString("kind").equals("bonus") && entry.optString("request_key").startsWith("award-adjust:")));
+  }
+
+  private void adjustLedgerStars(JSONObject entry, String summary) {
+    if (!parent() || busy) return;
+    LinearLayout f = form();
+    ui.add(f, ui.text(summary, 18, true), -2);
+    ui.line(f, "本次原积分 " + entry.optInt("amount") + " 颗星星。选择修改后的总积分，任务完成次数保持不变。");
+    final int[] amount = { entry.optInt("amount") };
+    TextView value = ui.text("", 28, true);
+    value.setGravity(Gravity.CENTER);
+    Runnable update = () -> value.setText("本次积分 " + amount[0] + " 颗星星");
+    LinearLayout picker = ui.row();
+    picker.addView(ui.button("−", false, () -> { amount[0] = Math.max(1, amount[0] - 1); update.run(); }), ui.lp(64, 52));
+    picker.addView(value, new LinearLayout.LayoutParams(0, ui.dp(52), 1));
+    picker.addView(ui.button("+", false, () -> { amount[0] = Math.min(2020, amount[0] + 1); update.run(); }), ui.lp(64, 52));
+    ui.add(f, picker, 52);
+    ui.gap(f, 12);
+    LinearLayout quick = ui.row();
+    for (int i = 1; i <= 5; i++) {
+      final int chosen = i;
+      quick.addView(ui.button(i + " 星", false, () -> { amount[0] = chosen; update.run(); }), new LinearLayout.LayoutParams(0, ui.dp(48), 1));
+    }
+    ui.add(f, quick, 48);
+    ui.line(f, "原到账记录会保留，账本会追加撤销与新积分记录；若要取消这次到账，可到星星账本撤销。");
+    update.run();
+    dialog("修改本次积分", f, "保存积分", () -> {
+      if (amount[0] == entry.optInt("amount")) { closeDialog(); return; }
+      async(() -> api.call("/api/ledger/" + entry.optString("id") + "/adjust", "POST",
+        json("amount", amount[0], "expected_amount", entry.optInt("amount")), true), result -> {
+        JSONObject next = ((JSONObject) result).optJSONObject("entry");
+        if (lastCardReceipt != null && lastCardReceipt.optJSONObject("entry").optString("id").equals(entry.optString("id"))) {
+          lastCardReceipt.put("entry", next);
+          saveCardReceipt();
+        }
+        closeDialog();
+        error = "";
+        render();
+        refresh(false);
+        toast("本次积分已修改为 " + next.optInt("amount") + " 颗星星");
+      }, true);
+    });
+  }
+
   private void skins() {
     LinearLayout f = form();
     ui.line(f, "选一个喜欢的世界，星星和任务会一起保留。");
@@ -1286,6 +1553,17 @@ public class MainActivity extends AppCompatActivity {
     LinearLayout f = form();
     ui.line(f, user.optString("name") + " · " + user.optString("username"));
     ui.line(f, "登录状态已安全保存，关闭应用或重启平板后会自动进入。");
+    if (parent() && taskCards.supported()) {
+      ui.line(f, "开启 NFC 并保持联网，手机亮屏解锁后碰任务卡，可自动打开应用并发星。同一张卡每天只发星一次。");
+      if (Build.VERSION.SDK_INT >= 36) f.addView(ui.button("允许 NFC 唤起应用", false, () -> {
+        closeDialog();
+        try { startActivity(new Intent(NfcAdapter.ACTION_CHANGE_TAG_INTENT_PREFERENCE)); }
+        catch (ActivityNotFoundException e) {
+          try { startActivity(new Intent(Settings.ACTION_NFC_SETTINGS)); }
+          catch (ActivityNotFoundException missing) { toast("请在系统设置中允许星星探险家通过 NFC 启动"); }
+        }
+      }));
+    }
     androidx.appcompat.widget.SwitchCompat orientationLock = new androidx.appcompat.widget.SwitchCompat(this);
     orientationLock.setText("锁定当前方向");
     orientationLock.setTextColor(skin.ink);
@@ -1358,6 +1636,11 @@ public class MainActivity extends AppCompatActivity {
 
   private void logoutLocal() {
     api.forget();
+    pendingLaunchCard = null;
+    taskCards.stop();
+    lastCardReceipt = null;
+    inspectedCard = null;
+    inspectionVersion++;
     requestVersion++;
     user = null;
     initialized = false;
@@ -1369,7 +1652,7 @@ public class MainActivity extends AppCompatActivity {
     childId = "";
     date = today();
     page = "today";
-    subject = "chinese";
+    subject = "all";
     taskScrollY = 0;
     error = "";
     closeDialog();
@@ -1378,9 +1661,9 @@ public class MainActivity extends AppCompatActivity {
 
   private void title(LinearLayout main, String title, Runnable add) {
     LinearLayout h = ui.row();
-    h.addView(ui.text(title, 25, true), new LinearLayout.LayoutParams(0, -2, 1));
+    h.addView(ui.text(title, 22, true), new LinearLayout.LayoutParams(0, -2, 1));
     if (add != null) h.addView(ui.button("＋ 添加", true, add));
-    ui.add(main, h, 58);
+    ui.add(main, h, 52);
     ui.gap(main, 10);
   }
 
@@ -1487,6 +1770,10 @@ public class MainActivity extends AppCompatActivity {
       ui.add(row, entry, -2);
       ui.gap(row, 12);
       if (parent() && e.isNull("reversed_by") && !e.optString("kind").equals("reversal")) {
+        if (editableAward(e)) {
+          row.addView(ui.button("修改本次积分", false, () -> adjustLedgerStars(e, e.optString("title"))));
+          ui.gap(row, 8);
+        }
         row.addView(
           ui.button("撤销这笔记录", false, () -> {
             LinearLayout f = form();
@@ -1576,14 +1863,10 @@ public class MainActivity extends AppCompatActivity {
     if (parent()) title(main, "奖励小铺管理", () -> rewardForm(null));
     LinearLayout top = ui.row();
     LinearLayout intro = ui.col();
-    ui.add(intro, ui.text("让努力，变成小心愿", 20, true), -2);
+    ui.add(intro, ui.text("让努力，变成小心愿", 17, true), -2);
     ui.gap(intro, 6);
     ui.add(intro, ui.label("家长确认兑换后扣除星星"), -2);
     top.addView(intro, new LinearLayout.LayoutParams(0, -2, 1));
-    if (parent()) {
-      top.addView(ui.button("审核兑换", false, () -> navigate("review")));
-      ui.gap(top, 8);
-    }
     top.addView(
       ui.button("兑换记录", false, () -> {
         LinearLayout f = form();
@@ -1635,7 +1918,7 @@ public class MainActivity extends AppCompatActivity {
         (rewardFilter.equals("active") ? r.optInt("active") == 1 : r.optInt("active") == 0)
       ) rewards.put(r);
     }
-    int cols = wide && widthDp() >= 1000 ? 3 : wide ? 2 : 1;
+    int cols = wide && widthDp() >= 1100 ? 3 : widthDp() >= 600 ? 2 : 1;
     LinearLayout grid = ui.col();
     ui.grow(main, region(grid, "shop"));
     if (rewards.length() == 0) ui.add(
@@ -1651,7 +1934,7 @@ public class MainActivity extends AppCompatActivity {
         grid,
         line,
         Math.round(
-          (parent() ? 368 : 320) * Math.max(1, getResources().getConfiguration().fontScale)
+          (parent() ? 268 : 240) * Math.max(1, getResources().getConfiguration().fontScale)
         )
       );
       for (int col = 0; col < cols; col++) {
@@ -1670,10 +1953,10 @@ public class MainActivity extends AppCompatActivity {
         ui.add(
           card,
           new ArtView(this, "ui/rewards-atlas.png", 3, 2, artIndex < 0 ? 4 : artIndex),
-          160
+          88
         );
         ui.gap(card, 10);
-        TextView rewardTitle = ui.text(r.optString("title"), 20, true);
+        TextView rewardTitle = ui.text(r.optString("title"), 17, true);
         ui.ellipsis(rewardTitle, 1);
         ui.add(card, rewardTitle, -2);
         ui.gap(card, 6);
@@ -1689,7 +1972,7 @@ public class MainActivity extends AppCompatActivity {
         ui.gap(price, 6);
         price.addView(ui.text("" + r.optInt("cost"), 23, true));
         ui.gap(card, 8);
-        TextView b = ui.button(parent() ? "编辑心愿" : "我想兑换", true, () -> {
+        TextView b = ui.button(parent() ? "编辑心愿" : "我想兑换", !parent(), () -> {
           if (parent()) rewardForm(r);
           else {
             LinearLayout f = form();
@@ -2055,57 +2338,51 @@ public class MainActivity extends AppCompatActivity {
       }
     }
     if (n == 0) ui.line(list, "暂时没有待确认的任务或心愿。");
-    ui.grow(main, ui.scroll(list));
+    ui.grow(main, region(list, "reviews"));
   }
 
   private void rules(LinearLayout main) {
     title(main, "科目与任务规则", () -> ruleForm(null, false));
     subjectStrip(main);
     ui.add(main, ui.label("模板修改从明天生效；当天调整请编辑具体任务。"), -2);
-    ui.gap(main, 10);
+    ui.gap(main, 12);
     LinearLayout list = ui.col();
-    list.addView(ui.button("从预制模板开始", false, this::templatePicker));
-    ui.gap(list, 14);
-    for (int si = 0; si < 5; si++) {
-      if (!subject.equals(SUBJECTS[si])) continue;
+    ui.add(list, ui.button("从预制模板开始", false, this::templatePicker), 44); ui.gap(list, 12);
+    int columns = widthDp() - (wide ? 148 : 28) >= 700 ? 2 : 1;
+    LinearLayout row = null; int count = 0;
+    JSONArray rules = array(data, "rules");
+    for (int i = 0; i < rules.length(); i++) {
+      JSONObject rule = obj(rules, i);
+      if (!rule.optString("subject", "other").equals(subject)) continue;
+      if (count % columns == 0) { row = ui.row(); row.setGravity(Gravity.TOP); ui.add(list, row, -2); }
+      LinearLayout card = ui.card();
       LinearLayout heading = ui.row();
-      heading.addView(new ArtView(this, "subjects/" + SUBJECTS[si] + ".webp"), ui.lp(66, 66));
-      ui.gap(heading, 12);
-      heading.addView(ui.text(LABELS[si], 23, true));
-      ui.add(list, heading, 72);
-      JSONArray a = array(data, "rules");
-      int count = 0;
-      for (int i = 0; i < a.length(); i++) {
-        JSONObject r = obj(a, i);
-        if (!r.optString("subject", "other").equals(SUBJECTS[si])) continue;
-        count++;
-        LinearLayout c = ui.card();
-        ui.line(c, r.optString("title") + "  ·  " + (r.optInt("enabled") == 1 ? "启用" : "停用"));
-        ui.line(c, r.optString("description"));
-        ui.add(
-          c,
-          ui.label(
-            "每次 " +
-              r.optInt("stars") +
-              " 星 · 上限 " +
-              r.optInt("daily_limit") +
-              " 次 · v" +
-              r.optInt("version")
-          ),
-          -2
-        );
-        ui.gap(c, 10);
-        c.addView(ui.button("编辑子任务", false, () -> ruleForm(r, false)));
-        LinearLayout order = ui.row();
-        for (String direction : new String[] {"up", "down"}) order.addView(ui.button(direction.equals("up") ? "上移" : "下移", false, () -> mutation(childPath() + "/task-order", "POST", json("rule_key", r.optString("rule_key"), "direction", direction), false, "任务顺序已保存")), new LinearLayout.LayoutParams(0, ui.dp(48), 1));
-        ui.add(c, order, 48);
-
-        ui.add(list, c, -2);
-        ui.gap(list, 10);
+      TextView name = ui.text(rule.optString("title"), 17, true); ui.ellipsis(name, 2);
+      heading.addView(name, new LinearLayout.LayoutParams(0, -2, 1)); ui.gap(heading, 8);
+      heading.addView(ui.label(rule.optInt("enabled") == 1 ? "启用" : "停用"));
+      ui.add(card, heading, -2); ui.gap(card, 8);
+      TextView description = ui.label(rule.optString("description")); ui.ellipsis(description, 2);
+      ui.add(card, description, -2); ui.gap(card, 10);
+      ui.add(card, ui.label("每次 " + rule.optInt("stars") + " 星 · 上限 " + rule.optInt("daily_limit") + " 次 · v" + rule.optInt("version")), -2);
+      ui.gap(card, 12);
+      LinearLayout actions = ui.row();
+      actions.addView(ui.button("编辑子任务", false, () -> ruleForm(rule, false)), new LinearLayout.LayoutParams(0, ui.dp(44), 1)); ui.gap(actions, 6);
+      actions.addView(ui.button("制作任务卡", false, () -> showTaskCardReader(new TaskCardId(childId, rule.optString("rule_key")), taskSummary(rule))), new LinearLayout.LayoutParams(0, ui.dp(44), 1));
+      ui.add(card, actions, 44); ui.gap(card, 8);
+      LinearLayout order = ui.row();
+      for (String direction : new String[] {"up", "down"}) {
+        TextView control = ui.button(direction.equals("up") ? "上移" : "下移", false, () -> mutation(childPath() + "/task-order", "POST", json("rule_key", rule.optString("rule_key"), "direction", direction), false, "任务顺序已保存"));
+        control.setTextSize(12); order.addView(control, new LinearLayout.LayoutParams(0, ui.dp(44), 1));
+        if (direction.equals("up")) ui.gap(order, 6);
       }
-      if (count == 0) ui.line(list, "还没有子任务，点击添加或选用预制模板。");
+      ui.add(card, order, 44);
+      row.addView(card, new LinearLayout.LayoutParams(0, -2, 1));
+      if (columns == 2 && count % 2 == 0) ui.gap(row, 12);
+      count++; if (count % columns == 0) ui.gap(list, 12);
     }
-    ui.grow(main, ui.scroll(list));
+    if (count == 0) ui.line(list, "还没有子任务，点击添加或选用预制模板。");
+    if (columns == 2 && count % 2 != 0) row.addView(new View(this), new LinearLayout.LayoutParams(0, -2, 1));
+    ui.grow(main, region(list, "rules"));
   }
 
   private void templatePicker() {
@@ -2335,22 +2612,68 @@ public class MainActivity extends AppCompatActivity {
         ui.add(main, line, 54);
       }
     } else ui.add(main, actions, 54);
-    ui.gap(main, 16);
-    LinearLayout list = ui.col();
+    ui.gap(main, 8);
+    LinearLayout stats = ui.row();
+    int parents = 0, kids = 0, disabled = 0;
     if (accounts != null) for (int i = 0; i < array(accounts, "users").length(); i++) {
       JSONObject u = obj(array(accounts, "users"), i);
-      LinearLayout card = ui.card();
-      ui.line(
-        card,
-        u.optString("name") + " · " + u.optString("username") + " · " + u.optString("role")
-      );
-      if (!u.optString("role").equals("admin")) {
-        card.addView(ui.button("编辑账号 / 重置密码", false, () -> editAccount(u)));
-      }
-      ui.add(list, card, -2);
-      ui.gap(list, 10);
+      if (u.optString("role").equals("parent")) parents++;
+      if (u.optString("role").equals("child")) kids++;
+      if (!u.optBoolean("active", u.optInt("active") == 1)) disabled++;
     }
-    ui.grow(main, ui.scroll(list));
+    String[][] metrics = {{"Building2", "家庭", "" + array(accounts, "families").length()}, {"Users", "家长", "" + parents}, {"Star", "小朋友", "" + kids}, {"Power", "已停用", "" + disabled}};
+    for (int i = 0; i < metrics.length; i++) {
+      LinearLayout card = ui.card(); ui.pad(card, 10);
+      card.addView(new NavigationIconView(this, skin, metrics[i][0]), ui.lp(20, 20)); ui.gap(card, 7);
+      ui.add(card, ui.text(metrics[i][2], 23, true), -2); ui.gap(card, 3);
+      TextView label = ui.label(metrics[i][1]); label.setTextSize(11); ui.add(card, label, -2);
+      stats.addView(card, new LinearLayout.LayoutParams(0, -1, 1)); if (i < 3) ui.gap(stats, 8);
+    }
+    ui.add(main, stats, 104); ui.gap(main, 12);
+    LinearLayout search = ui.row(); ui.pad(search, 9); search.setBackground(ui.bg(skin.surface, 12, true));
+    search.addView(new NavigationIconView(this, skin, "Search"), ui.lp(20, 20)); ui.gap(search, 7);
+    EditText query = new EditText(this); query.setHint("搜索称呼、账号或家庭"); query.setTextSize(14); query.setTextColor(skin.ink); query.setHintTextColor(skin.muted); query.setSingleLine(true); query.setBackgroundColor(Color.TRANSPARENT); query.setPadding(0, 0, 0, 0);
+    search.addView(query, new LinearLayout.LayoutParams(0, -1, 1)); ui.add(main, search, 48); ui.gap(main, 12);
+    LinearLayout list = ui.col();
+    adminAccountRows(list, "");
+    query.addTextChangedListener(watch(value -> adminAccountRows(list, value)));
+    ui.grow(main, region(list, "admin"));
+  }
+
+  private String familyName(String id) {
+    if (accounts != null) for (int i = 0; i < array(accounts, "families").length(); i++) {
+      JSONObject family = obj(array(accounts, "families"), i); if (family.optString("id").equals(id)) return family.optString("name");
+    }
+    return "全局管理";
+  }
+
+  private void adminAccountRows(LinearLayout list, String query) {
+    list.removeAllViews();
+    if (accounts == null) { ui.add(list, ui.label("正在加载账号…"), -2); return; }
+    for (int i = 0; i < array(accounts, "users").length(); i++) {
+      JSONObject u = obj(array(accounts, "users"), i);
+      String family = familyName(u.optString("family_id"));
+      if (!(u.optString("name") + " " + u.optString("username") + " " + family).toLowerCase(Locale.ROOT).contains(query.trim().toLowerCase(Locale.ROOT))) continue;
+      String role = u.optString("role");
+      LinearLayout card = wide ? ui.row() : ui.card(); ui.pad(card, 13); card.setBackground(ui.bg(skin.surface, 16, true));
+      LinearLayout row = ui.row();
+      row.addView(ui.iconBox(role.equals("child") ? "Star" : role.equals("parent") ? "Users" : "ShieldCheck", 20), ui.lp(38, 38)); ui.gap(row, 10);
+      LinearLayout copy = ui.col(); ui.add(copy, ui.text(u.optString("name"), 15, true), -2); ui.gap(copy, 4);
+      TextView username = ui.label(u.optString("username")); username.setTextSize(11); ui.add(copy, username, -2);
+      row.addView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+      TextView badge = ui.label(role.equals("child") ? "小朋友" : role.equals("parent") ? "家长" : "管理员"); badge.setTextSize(11); row.addView(badge);
+      if (wide) { card.addView(row, new LinearLayout.LayoutParams(0, -2, 1)); ui.gap(card, 24); }
+      else { ui.add(card, row, -2); ui.gap(card, 10); }
+      LinearLayout foot = ui.row();
+      TextView details = ui.label(family + " · " + (u.optInt("active", 1) == 1 ? "使用中" : "已停用")); details.setTextSize(11); foot.addView(details, wide ? ui.lp(210, -2) : new LinearLayout.LayoutParams(0, -2, 1));
+      if (!role.equals("admin")) {
+        LinearLayout edit = ui.iconBox("Pencil", 17); edit.setContentDescription("编辑账号 " + u.optString("name")); edit.setFocusable(true); edit.setOnClickListener(v -> editAccount(u)); foot.addView(edit, ui.lp(44, 44)); ui.gap(foot, 6);
+        LinearLayout key = ui.iconBox("KeyRound", 17); key.setContentDescription("重置密码 " + u.optString("name")); key.setFocusable(true); key.setOnClickListener(v -> editAccount(u)); foot.addView(key, ui.lp(44, 44));
+      }
+      if (wide) card.addView(foot, ui.lp(-2, 44)); else ui.add(card, foot, 44);
+      ui.add(list, card, -2); ui.gap(list, 8);
+    }
+    if (list.getChildCount() == 0) ui.add(list, center("没有找到匹配的账号"), 100);
   }
 
   private void createAccount() {

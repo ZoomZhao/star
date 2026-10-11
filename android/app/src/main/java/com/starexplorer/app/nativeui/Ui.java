@@ -52,7 +52,7 @@ public final class Ui {
     t.setTextSize(size);
     t.setTextColor(s.ink);
     t.setIncludeFontPadding(false);
-    if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+    t.setTypeface(IslandTypeface.get(c, bold));
     return t;
   }
 
@@ -67,17 +67,16 @@ public final class Ui {
     b.setGravity(Gravity.CENTER);
     b.setMinHeight(dp(48));
     b.setPadding(dp(14), dp(8), dp(14), dp(8));
-    b.setTextColor(primary ? 0xFFFFFFFF : s.primary);
-    GradientDrawable face = new GradientDrawable(
-      GradientDrawable.Orientation.TOP_BOTTOM,
-      new int[] {
-        primary ? s.accent : s.surface,
-        primary ? s.primary : androidx.core.graphics.ColorUtils.blendARGB(s.surface, s.soft, .35f),
-      }
-    );
-    face.setCornerRadius(dp(14));
-    face.setStroke(dp(1), primary ? s.accent : s.border);
-    b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x22444444), face, null));
+    b.setTextColor(primary ? android.graphics.Color.WHITE : s.ink);
+    b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x226C5CFF), bg(primary ? s.primary : s.surface, 12, !primary), null));
+    String icon = actionIcon(title);
+    if (icon != null) try (java.io.InputStream in = c.getAssets().open("ui/v2/" + icon + ".png")) {
+      Drawable d = Drawable.createFromStream(in, icon);
+      d.setBounds(0, 0, dp(18), dp(18));
+      d.setTint(primary ? android.graphics.Color.WHITE : s.primary);
+      b.setCompoundDrawables(d, null, null, null);
+      b.setCompoundDrawablePadding(dp(7));
+    } catch (java.io.IOException ignored) {}
     b.setClickable(true);
     b.setFocusable(true);
     b.setOnClickListener(v -> {
@@ -97,6 +96,36 @@ public final class Ui {
       }
     );
     return b;
+  }
+
+  private String actionIcon(String text) {
+    if (text.contains("下载")) return "Download";
+    if (text.contains("恢复备份")) return "Upload";
+    if (text.contains("家庭")) return "Building2";
+    if (text.contains("分配账号")) return "UserPlus";
+    if (text.contains("密码")) return "KeyRound";
+    if (text.contains("编辑") || text.contains("修改")) return "Pencil";
+    if (text.contains("检测")) return "ScanLine";
+    if (text.contains("卡")) return "Nfc";
+    if (text.contains("退出")) return "LogOut";
+    if (text.contains("刷新") || text.contains("重试") || text.contains("重新连接")) return "RefreshCw";
+    if (text.contains("皮肤") || text.contains("换装")) return "Palette";
+    if (text.equals("设置")) return "Settings";
+    if (text.startsWith("星星 ") || text.contains("账本")) return "Star";
+    if (text.contains("添加") || text.contains("新增")) return "Plus";
+    if (text.contains("退回")) return "X";
+    if (text.contains("发放") || text.contains("发星") || text.contains("提交")) return "Send";
+    if (text.equals("‹")) return null;
+    if (text.equals("›")) return null;
+    return null;
+  }
+
+  public LinearLayout iconBox(String name, int size) {
+    LinearLayout box = row();
+    box.setGravity(Gravity.CENTER);
+    box.setBackground(bg(s.soft, 12, false));
+    box.addView(new NavigationIconView(c, s, name), lp(size, size));
+    return box;
   }
 
   public LinearLayout card() {
@@ -142,6 +171,7 @@ public final class Ui {
     gap(l, 6);
     EditText e = new EditText(c);
     e.setTextSize(16);
+    e.setTypeface(IslandTypeface.get(c, false));
     e.setTextColor(s.ink);
     e.setInputType(type);
     e.setText(value);
