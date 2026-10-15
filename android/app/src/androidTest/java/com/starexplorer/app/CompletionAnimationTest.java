@@ -90,7 +90,7 @@ public class CompletionAnimationTest {
       json("username", "child", "password", "child123"),
       false
     );
-    client.authenticate(login.getString("token"));
+    client.authenticate(login.getString("token"), login.getJSONObject("user").getString("id"));
     JSONObject child = (JSONObject) client.get("/api/me");
     String path = "/api/children/" + child.getString("id") + "/dashboard";
     JSONObject before = (JSONObject) client.get(path);

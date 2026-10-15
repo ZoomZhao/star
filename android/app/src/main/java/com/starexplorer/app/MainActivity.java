@@ -21,7 +21,6 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.*;
 import com.starexplorer.app.nativeui.*;
 import java.io.*;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 import org.json.*;
@@ -53,6 +52,7 @@ public class MainActivity extends AppCompatActivity {
     error = "";
   private int taskScrollY = 0,
     requestVersion = 0;
+  private volatile int sessionVersion = 0;
   private boolean busy = false,
     initialized = false,
     wide = false,
@@ -66,7 +66,7 @@ public class MainActivity extends AppCompatActivity {
   private JSONObject inspectedCard;
   private String inspectionMessage = "等待任务卡…";
   private String cardStatus = "";
-  private NfcTaskCards.CardRead pendingLaunchCard;
+  private boolean pendingCardScan;
   private int inspectionVersion = 0;
   private byte[] pendingBackup;
   private final Runnable poll = new Runnable() {
@@ -85,19 +85,12 @@ public class MainActivity extends AppCompatActivity {
   }
 
   public static String today() {
-    SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-    f.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
-    return f.format(new Date());
+    return ShanghaiDate.today();
   }
 
   private String shift(String d, int n) {
     try {
-      SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-      f.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
-      Calendar c = Calendar.getInstance();
-      c.setTime(f.parse(d));
-      c.add(Calendar.DATE, n);
-      return f.format(c.getTime());
+      return ShanghaiDate.shift(d, n);
     } catch (Exception e) {
       return today();
     }
@@ -223,31 +216,37 @@ public class MainActivity extends AppCompatActivity {
   void handleTaskCardIntent(Intent intent) {
     if (intent == null || !NfcAdapter.ACTION_NDEF_DISCOVERED.equals(intent.getAction()) || intent.getBooleanExtra("task-card-consumed", false)) return;
     try {
-      NfcTaskCards.CardRead read = NfcTaskCards.fromIntent(intent);
+      // The exported Activity accepts navigation only. Never use caller-supplied Tag,
+      // NDEF payload or card identity to authorize an award, even if they look valid.
+      TaskCardId.parse(intent.getDataString());
       if (busy || activeDialog != null) {
         toast("当前操作尚未结束，请完成或关闭窗口后重新碰卡");
         return;
       }
       if (!api.hasSession()) {
-        pendingLaunchCard = null;
+        pendingCardScan = false;
         error = "请先使用家长账号登录，再碰卡发星";
         render();
         return;
       }
-      taskCards.ignoreUntilRemoved(read.tag);
-      pendingLaunchCard = read;
+      pendingCardScan = true;
       processTaskCardLaunch();
     } catch (RuntimeException e) {
-      pendingLaunchCard = null;
-      error = e instanceof IllegalArgumentException ? e.getMessage() : "任务卡信息读取失败，请重新碰卡";
-      if (page.equals("card-inspect")) {
-        inspectionVersion++;
-        inspectedCard = null;
-        inspectionMessage = error;
-        error = "";
-      }
-      render();
+      taskCardLaunchError("任务卡信息读取失败，请重新碰卡");
     } finally { consumeTaskCardIntent(intent); }
+  }
+
+  private void taskCardLaunchError(String message) {
+    pendingCardScan = false;
+    error = message;
+    if (page.equals("card-inspect")) {
+      inspectionVersion++;
+      inspectedCard = null;
+      inspectionMessage = error;
+      error = "";
+    }
+    render();
+    startCardScanning();
   }
 
   private void consumeTaskCardIntent(Intent intent) {
@@ -260,17 +259,26 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private void processTaskCardLaunch() {
-    if (pendingLaunchCard == null || !resumed || user == null || !initialized || loading || busy) return;
-    NfcTaskCards.CardRead read = pendingLaunchCard;
-    pendingLaunchCard = null;
+    if (!pendingCardScan || !resumed || user == null || !initialized || loading || busy) return;
+    pendingCardScan = false;
     if (activeDialog != null) { toast("请先关闭当前窗口，再重新碰卡"); return; }
     if (!parent()) {
       error = "请使用家长账号登录后碰卡发星";
       render();
-    } else if (page.equals("card-inspect")) {
-      inspectTaskCard(read.card, read.uid);
     } else {
-      openTaskCard(read.card, read.uid);
+      taskCards.stop();
+      error = "";
+      if (page.equals("card-inspect")) {
+        inspectionVersion++;
+        inspectedCard = null;
+        inspectionMessage = "请保持任务卡贴近手机，或移开后重新碰卡检测";
+      } else {
+        page = "cards";
+        cardStatus = "请保持任务卡贴近手机，或移开后重新碰卡";
+        loadCardReceipt();
+      }
+      render();
+      startCardScanning();
     }
   }
 
@@ -306,7 +314,7 @@ public class MainActivity extends AppCompatActivity {
   protected void onPause() {
     super.onPause();
     resumed = false;
-    pendingLaunchCard = null;
+    pendingCardScan = false;
     inspectionVersion++;
     if (inspectionMessage.equals("正在查询这张卡的绑定信息…")) inspectionMessage = "请重新碰卡检测";
     handler.removeCallbacks(poll);
@@ -325,6 +333,7 @@ public class MainActivity extends AppCompatActivity {
 
   private void async(Work work, Done done, boolean mutating) {
     if (mutating && busy) return;
+    int currentSessionVersion = sessionVersion;
     if (mutating) busy = true;
     AlertDialog operationDialog = mutating ? activeDialog : null;
     android.widget.Button action =
@@ -339,6 +348,7 @@ public class MainActivity extends AppCompatActivity {
       action.setText("处理中…");
     }
     worker.execute(() -> {
+      if (currentSessionVersion != sessionVersion) return;
       Object value = null;
       Exception failure = null;
       try {
@@ -349,7 +359,7 @@ public class MainActivity extends AppCompatActivity {
       final Object result = value;
       final Exception err = failure;
       handler.post(() -> {
-        if (isDestroyed()) return;
+        if (isDestroyed() || currentSessionVersion != sessionVersion) return;
         if (mutating) busy = false;
         if (operationDialog != null && operationDialog.isShowing()) {
           operationDialog.setCancelable(true);
@@ -359,13 +369,14 @@ public class MainActivity extends AppCompatActivity {
           action.setEnabled(true);
           action.setText(actionTitle);
         }
+        if (err instanceof StarApi.ApiException && !api.isCurrentSession((StarApi.ApiException) err)) return;
         if (err != null) {
           if (err instanceof StarApi.ApiException && ((StarApi.ApiException) err).status == 401) {
             logoutLocal();
           }
           error = err.getMessage() == null ? "操作未完成，请重试" : err.getMessage();
-          if (pendingLaunchCard != null) {
-            pendingLaunchCard = null;
+          if (pendingCardScan) {
+            pendingCardScan = false;
             error += "；请恢复连接后重新碰卡，本次尚未确认";
           }
           loading = false;
@@ -386,7 +397,7 @@ public class MainActivity extends AppCompatActivity {
     loading = true;
     render();
     async(
-      () -> api.get("/api/me"),
+      () -> api.resumeSession(),
       r -> {
         user = (JSONObject) r;
         loadInitial();
@@ -686,7 +697,7 @@ public class MainActivity extends AppCompatActivity {
     if (parent() && !admin()) {
       ui.add(list, ui.label("任务管理"), -2); ui.gap(list, 10);
       moreItem(list, "BookOpen", "任务规则", "科目、星星、每日次数与安排", () -> navigate("rules"));
-      moreItem(list, "Nfc", "碰卡发星", "亮屏解锁后碰卡即可自动到账", () -> showTaskCardReader(null, null));
+      moreItem(list, "Nfc", "碰卡发星", "打开扫描页面，保持任务卡贴近手机", () -> showTaskCardReader(null, null));
       moreItem(list, "Nfc", "制作任务卡", "选择任务，将它写入一张空白卡", () -> navigate("rules"));
       moreItem(list, "ScanLine", "检测卡片", "核对孩子、任务与今日使用状态", this::showTaskCardInspection);
       ui.gap(list, 14);
@@ -775,7 +786,7 @@ public class MainActivity extends AppCompatActivity {
               json("username", u, "password", p),
               false
             );
-            api.authenticate(r.getString("token"));
+            api.authenticate(r.getString("token"), r.getJSONObject("user").getString("id"));
             return r.getJSONObject("user");
           },
           r -> {
@@ -1351,6 +1362,7 @@ public class MainActivity extends AppCompatActivity {
       catch (Exception e) { return e; }
     }, result -> {
       if (!resumed || !page.equals("card-inspect") || version != inspectionVersion || user == null || !owner.equals(user.optString("id"))) return;
+      if (result instanceof StarApi.ApiException && !api.isCurrentSession((StarApi.ApiException) result)) return;
       if (result instanceof StarApi.ApiException && ((StarApi.ApiException) result).status == 401) { logoutLocal(); return; }
       if (result instanceof Exception) {
         inspectionMessage = ((Exception) result).getMessage();
@@ -1559,7 +1571,7 @@ public class MainActivity extends AppCompatActivity {
     ui.line(f, user.optString("name") + " · " + user.optString("username"));
     ui.line(f, "登录状态已安全保存，关闭应用或重启平板后会自动进入。");
     if (parent() && taskCards.supported()) {
-      ui.line(f, "开启 NFC 并保持联网，手机亮屏解锁后碰任务卡，可自动打开应用并发星。同一张卡每天只发星一次。");
+      ui.line(f, "开启 NFC 并保持联网，亮屏解锁后碰任务卡会打开扫描页面。请保持卡片贴近手机，未读到时移开再碰一次；读取确认后发星，同一张卡每天只发星一次。");
       if (Build.VERSION.SDK_INT >= 36) f.addView(ui.button("允许 NFC 唤起应用", false, () -> {
         closeDialog();
         try { startActivity(new Intent(NfcAdapter.ACTION_CHANGE_TAG_INTENT_PREFERENCE)); }
@@ -1631,17 +1643,22 @@ public class MainActivity extends AppCompatActivity {
       ui.button("退出并切换账号", false, () -> {
         LinearLayout c = form();
         ui.line(c, "退出后需要重新输入账号和密码。");
-        dialog("切换账号", c, "退出登录", () ->
-          async(() -> api.call("/api/logout", "POST", json(), false), r -> logoutLocal(), true)
-        );
+        dialog("切换账号", c, "退出登录", () -> {
+          Runnable revokeOldSession = api.prepareLogout();
+          logoutLocal();
+          new Thread(revokeOldSession, "star-session-logout").start();
+        });
       })
     );
     dialog("账号设置", f, null, null);
   }
 
   private void logoutLocal() {
+    sessionVersion++;
     api.forget();
-    pendingLaunchCard = null;
+    busy = false;
+    loading = false;
+    pendingCardScan = false;
     taskCards.stop();
     lastCardReceipt = null;
     inspectedCard = null;
@@ -2113,7 +2130,7 @@ public class MainActivity extends AppCompatActivity {
       int n = number(cost, 1, 100000); if (n < 0 || title.length() == 0) return;
       RadioButton selected = picker.findViewById(picker.getCheckedRadioButtonId());
       mutation(r == null ? childPath() + "/rewards" : "/api/rewards/" + r.optString("id"), r == null ? "POST" : "PATCH",
-        json("title", title.getText().toString(), "description", desc.getText().toString(), "cost", n, "icon", selected.getTag().toString(), "active", active.isChecked()), false, "心愿已保存");
+        json("title", title.getText().toString(), "description", desc.getText().toString(), "cost", n, "icon", selected.getTag().toString(), "active", active.isChecked()), r == null, "心愿已保存");
     });
   }
 
@@ -2572,7 +2589,7 @@ public class MainActivity extends AppCompatActivity {
             : childPath() + "/rules",
         existing ? "PATCH" : "POST",
         body,
-        false,
+        !existing,
         "任务规则已保存"
       );
     });
@@ -2590,7 +2607,7 @@ public class MainActivity extends AppCompatActivity {
             "/api/admin/families",
             "POST",
             json("name", name.getText().toString()),
-            false,
+            true,
             "家庭已创建"
           )
         );

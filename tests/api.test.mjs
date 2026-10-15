@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.mjs';
 import { addDays, today, uid, get, seedTemplates } from '../server/db.mjs';
+import { cardDayLedgerId } from '../server/card-identity.mjs';
 async function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), 'star-test-'));
   const { app, db } = createApp({
@@ -48,6 +49,97 @@ async function setup(t) {
       .data;
   return { db, dir, call, parent, child, admin, dashboard, login };
 }
+test('physical card identities remain compatible with existing ledger records', () => {
+  assert.equal(
+    cardDayLedgerId('123e4567-e89b-42d3-a456-426614174000', '2026-10-15', '01020304'),
+    '1919a842-08ab-52f2-ab68-01fc245830c4',
+  );
+});
+
+test('creation retries preserve one rule, reward and family across sessions and backup restore', async (t) => {
+  const s = await setup(t);
+  const examples = [
+    {
+      path: `/api/children/${s.child.user.id}/rules`,
+      token: s.parent.token,
+      body: { title: '可安全重试的规则', stars: 3, daily_limit: 10, schedule: 'daily' },
+    },
+    {
+      path: `/api/children/${s.child.user.id}/rewards`,
+      token: s.parent.token,
+      body: { title: '可安全重试的奖励', cost: 7 },
+    },
+    { path: '/api/admin/families', token: s.admin.token, body: { name: '可安全重试的家庭' } },
+  ];
+  for (const example of examples) {
+    example.key = uid();
+    const created = await s.call(example.path, 'POST', example.body, example.token, example.key);
+    assert.equal(created.status, 201);
+    example.row = created.data;
+    const retry = await s.call(example.path, 'POST', example.body, example.token, example.key);
+    assert.deepEqual(retry.data, created.data);
+    const changed = {
+      ...example.body,
+      ...(example.body.name ? { name: '另一家庭' } : { title: '另一内容' }),
+    };
+    assert.equal(
+      (await s.call(example.path, 'POST', changed, example.token, example.key)).status,
+      409,
+    );
+  }
+  const before = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  assert.equal(
+    (
+      await s.call(
+        '/api/admin/restore',
+        'POST',
+        {
+          backup: before,
+          password: 'local-admin-2026',
+        },
+        s.admin.token,
+      )
+    ).status,
+    200,
+  );
+  const parent = await s.login('parent', 'parent123');
+  const admin = await s.login('admin', 'local-admin-2026');
+  for (const example of examples) {
+    const token = example.path === '/api/admin/families' ? admin.token : parent.token;
+    const retry = await s.call(example.path, 'POST', example.body, token, example.key);
+    assert.deepEqual(retry.data, example.row);
+  }
+  assert.deepEqual(
+    (await s.call('/api/admin/backup', 'GET', null, admin.token)).data.data,
+    before.data,
+  );
+  // Even an identical UUID from a different account has its own identity.
+  const reward = examples[1];
+  const separate = await s.call(reward.path, 'POST', reward.body, admin.token, reward.key);
+  assert.equal(separate.status, 201);
+  assert.notEqual(separate.data.id, reward.row.id);
+});
+
+test('reward status changes preserve details edited by another parent', async (t) => {
+  const s = await setup(t);
+  const reward = (await s.dashboard()).rewards[0];
+  const path = `/api/rewards/${reward.id}`;
+  const edited = {
+    ...reward,
+    title: '新心愿名称',
+    description: '新的家庭约定',
+    icon: 'picnic',
+    cost: 23,
+    active: true,
+  };
+  assert.equal((await s.call(path, 'PATCH', edited, s.parent.token)).status, 200);
+  for (const active of [false, true]) {
+    assert.equal((await s.call(path, 'PATCH', { active }, s.parent.token)).status, 200);
+    const current = (await s.dashboard()).rewards.find((r) => r.id === reward.id);
+    assert.deepEqual(current, { ...edited, active: Number(active) });
+  }
+  assert.equal((await s.call(path, 'PATCH', { cost: 0 }, s.parent.token)).status, 400);
+});
 test('pending counts toward cap; duplicate retries and parallel approvals never double-award', async (t) => {
   const s = await setup(t),
     d = await s.dashboard(),
@@ -494,12 +586,26 @@ test('parents manage active and inactive family rewards; children only see and r
   assert.equal(visible.cost, 8);
 });
 
-test('future previews follow template edits while daily overrides and history stay intact', async (t) => {
+test('template edits preserve every existing snapshot and custom cap; only ungenerated dates use new versions', async (t) => {
   const s = await setup(t),
     todayData = await s.dashboard();
   const rule = todayData.rules[0],
     tomorrow = addDays(today(), 1),
     later = addDays(today(), 2);
+  const customized = {
+    ...rule,
+    title: '自定义十次任务',
+    description: '保留全部快照字段',
+    subject: 'math',
+    icon: 'pencil',
+    stars: 3,
+    daily_limit: 10,
+    enabled: true,
+  };
+  assert.equal(
+    (await s.call(`/api/rules/${rule.rule_key}`, 'PATCH', customized, s.parent.token)).status,
+    200,
+  );
   const preview = (await s.dashboard(tomorrow)).tasks.find((x) => x.rule_key === rule.rule_key);
   const override = (await s.dashboard(later)).tasks.find((x) => x.rule_key === rule.rule_key);
   assert.equal(
@@ -507,19 +613,40 @@ test('future previews follow template edits while daily overrides and history st
       .status,
     200,
   );
-  const change = { ...rule, stars: 4, enabled: true };
+  const baseline = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+  const assertExistingRowsPreserved = async () => {
+    const after = (await s.call('/api/admin/backup', 'GET', null, s.admin.token)).data;
+    for (const [table, rows] of Object.entries(baseline.data)) {
+      for (const row of rows) {
+        const current = after.data[table].find((candidate) =>
+          table === 'task_order'
+            ? candidate.child_id === row.child_id && candidate.rule_key === row.rule_key
+            : candidate.id === row.id,
+        );
+        assert.deepEqual(current, row, `${table}: existing record must remain intact`);
+      }
+    }
+  };
+  const change = { ...customized, title: '新版任务', stars: 4, daily_limit: 2 };
   assert.equal(
     (await s.call(`/api/rules/${rule.rule_key}`, 'PATCH', change, s.parent.token)).status,
     200,
   );
   const fresh = (await s.dashboard(tomorrow)).tasks.find((x) => x.rule_key === rule.rule_key);
-  assert.notEqual(fresh.id, preview.id);
-  assert.equal(fresh.stars, 4);
+  assert.deepEqual(fresh, preview);
+  assert.equal(fresh.daily_limit, 10);
   assert.equal(
     (await s.dashboard()).tasks.find((x) => x.rule_key === rule.rule_key).stars,
     rule.stars,
   );
   assert.equal((await s.dashboard(later)).tasks.find((x) => x.id === override.id).stars, 9);
+  const unseen = (await s.dashboard(addDays(today(), 3))).tasks.find(
+    (x) => x.rule_key === rule.rule_key,
+  );
+  assert.equal(unseen.stars, 4);
+  assert.equal(unseen.daily_limit, 2);
+  assert.equal(unseen.title, '新版任务');
+  await assertExistingRowsPreserved();
   assert.equal(
     (
       await s.call(
@@ -531,20 +658,56 @@ test('future previews follow template edits while daily overrides and history st
     ).status,
     200,
   );
-  assert.ok(!(await s.dashboard(tomorrow)).tasks.some((x) => x.rule_key === rule.rule_key));
+  assert.deepEqual(
+    (await s.dashboard(tomorrow)).tasks.find((x) => x.id === preview.id),
+    preview,
+  );
+  assert.ok(
+    !(await s.dashboard(addDays(today(), 4))).tasks.some((x) => x.rule_key === rule.rule_key),
+  );
   assert.equal(
     (
       await s.call(
         `/api/rules/${rule.rule_key}`,
         'PATCH',
-        { ...change, schedule: 'once', on_date: later },
+        { ...change, schedule: 'once', on_date: addDays(today(), 5) },
         s.parent.token,
       )
     ).status,
     200,
   );
-  assert.ok(!(await s.dashboard(tomorrow)).tasks.some((x) => x.rule_key === rule.rule_key));
+  assert.deepEqual(
+    (await s.dashboard(tomorrow)).tasks.find((x) => x.id === preview.id),
+    preview,
+  );
   assert.equal((await s.dashboard(later)).tasks.find((x) => x.id === override.id).stars, 9);
+  assert.ok(
+    !(await s.dashboard(addDays(today(), 4))).tasks.some((x) => x.rule_key === rule.rule_key),
+  );
+  assert.ok(
+    (await s.dashboard(addDays(today(), 5))).tasks.some((x) => x.rule_key === rule.rule_key),
+  );
+  const weeklyDate = addDays(today(), 7);
+  assert.equal(
+    (
+      await s.call(
+        `/api/rules/${rule.rule_key}`,
+        'PATCH',
+        {
+          ...change,
+          schedule: 'weekly',
+          weekdays: [new Date(weeklyDate + 'T12:00:00Z').getUTCDay()],
+        },
+        s.parent.token,
+      )
+    ).status,
+    200,
+  );
+  assert.ok(
+    !(await s.dashboard(addDays(today(), 6))).tasks.some((x) => x.rule_key === rule.rule_key),
+  );
+  assert.ok((await s.dashboard(weeklyDate)).tasks.some((x) => x.rule_key === rule.rule_key));
+  await assertExistingRowsPreserved();
 });
 
 test('idempotency rejects changed payloads and replays successful redemptions after delisting', async (t) => {

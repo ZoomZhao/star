@@ -137,7 +137,10 @@ const rows = {
     })
     .strict(),
 };
-const tables = [...Object.keys(rows).filter((t) => t !== 'task_order'), 'task_order'];
+export const backupTables = Object.freeze([
+  ...Object.keys(rows).filter((t) => t !== 'task_order'),
+  'task_order',
+]);
 function invalid(message) {
   throw Object.assign(new Error(message), { status: 400 });
 }
@@ -149,7 +152,7 @@ const backupSchema = z
     data: z
       .object(
         Object.fromEntries(
-          tables.map((t) => [
+          backupTables.map((t) => [
             t,
             t === 'task_order'
               ? z.array(rows[t]).max(100000).default([])
@@ -161,23 +164,52 @@ const backupSchema = z
   })
   .strict();
 export function snapshot(db) {
-  return {
+  const read = () => ({
     format: 'star-explorer',
     version: 1,
     exported_at: now(),
-    data: Object.fromEntries(tables.map((t) => [t, all(db, `SELECT * FROM ${t}`)])),
-  };
+    data: Object.fromEntries(backupTables.map((t) => [t, all(db, `SELECT * FROM ${t}`)])),
+  });
+  if (db.isTransaction) return read();
+  // Every table must come from the same SQLite snapshot, including external writers.
+  db.exec('BEGIN');
+  try {
+    const result = read();
+    db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 function importRows(db, data) {
   db.exec('PRAGMA defer_foreign_keys=ON;');
-  for (const t of [...tables].reverse()) db.exec(`DELETE FROM ${t}`);
-  for (const t of tables) for (const row of data[t]) insert(db, t, row);
+  for (const t of [...backupTables].reverse()) db.exec(`DELETE FROM ${t}`);
+  for (const t of backupTables) for (const row of data[t]) insert(db, t, row);
 }
-export function restore(db, input, backupDir) {
+// Validate in isolation so deployment checks and restores share every invariant.
+export function validateBackup(input) {
   const content = backupSchema.parse(input);
   const candidate = openDb(':memory:');
   try {
     tx(candidate, () => importRows(candidate, content.data));
+    if (
+      get(
+        candidate,
+        'SELECT rule_key FROM rules GROUP BY rule_key HAVING COUNT(DISTINCT child_id)>1 LIMIT 1',
+      )
+    )
+      invalid('备份任务规则归属不一致');
+    if (
+      get(
+        candidate,
+        `SELECT t.id FROM tasks t WHERE NOT EXISTS (
+          SELECT 1 FROM rules r WHERE r.child_id=t.child_id
+          AND r.rule_key=t.rule_key AND r.version=t.rule_version
+        ) LIMIT 1`,
+      )
+    )
+      invalid('备份任务来源版本不一致');
     if (
       get(
         candidate,
@@ -297,10 +329,16 @@ export function restore(db, input, backupDir) {
   } finally {
     candidate.close();
   }
-  mkdirSync(backupDir, { recursive: true });
+  return content;
+}
+export function restore(db, input, backupDir) {
+  const content = validateBackup(input);
   const saved = join(backupDir, `before-restore-${Date.now()}.json`);
-  writeFileSync(saved, JSON.stringify(snapshot(db)), { mode: 0o600, flag: 'wx' });
   tx(db, () => {
+    // Hold the write lock from the saved state through replacement; no writer can
+    // commit data after this backup and have that data silently lost by restore.
+    mkdirSync(backupDir, { recursive: true });
+    writeFileSync(saved, JSON.stringify(snapshot(db)), { mode: 0o600, flag: 'wx' });
     db.exec('DELETE FROM sessions');
     importRows(db, content.data);
   });

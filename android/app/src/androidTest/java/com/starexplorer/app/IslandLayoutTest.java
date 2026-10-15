@@ -53,7 +53,7 @@ public class IslandLayoutTest {
     client=new StarApi(context,"http://127.0.0.1:3004");
     JSONObject childLogin=(JSONObject)client.call("/api/login","POST",json("username","child","password","child123"),false);
     String childId=childLogin.getJSONObject("user").getString("id");
-    JSONObject parentLogin=(JSONObject)client.call("/api/login","POST",json("username","parent","password","parent123"),false);client.authenticate(parentLogin.getString("token"));
+    JSONObject parentLogin=(JSONObject)client.call("/api/login","POST",json("username","parent","password","parent123"),false);client.authenticate(parentLogin.getString("token"), parentLogin.getJSONObject("user").getString("id"));
     String path="/api/children/"+childId;
     client.call(path+"/rules","POST",json("title","阅读绘本并和爸爸妈妈分享今天最喜欢的故事片段", "description","保留自定义每日十次规则", "subject","chinese","stars",3,"daily_limit",10,"schedule","daily"),false);
     JSONObject before=(JSONObject)client.get(path+"/dashboard");
@@ -89,7 +89,7 @@ public class IslandLayoutTest {
     for(String role:new String[]{"child","admin"}) {
       client=new StarApi(context,"http://127.0.0.1:3004");
       JSONObject login=(JSONObject)client.call("/api/login","POST",json("username",role,"password",role.equals("admin")?"native-test-admin":"child123"),false);
-      client.authenticate(login.getString("token"));
+      client.authenticate(login.getString("token"), login.getJSONObject("user").getString("id"));
       scenario=ActivityScenario.launch(new Intent(context,MainActivity.class).putExtra("test_api","http://127.0.0.1:3004"));
       waitText(role.equals("admin")?"账号分配与数据备份":"今天的小任务");
       capture(role);

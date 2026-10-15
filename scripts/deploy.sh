@@ -2,6 +2,9 @@
 # Uses standard SSH password prompt. Passwords are never put in command arguments.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+if [ "${1:-}" != '--backed-up' ]; then
+  exec node scripts/deploy-protected.mjs
+fi
 if [ ! -f .env ]; then echo '请先复制 .env.example 为 .env 并填写部署配置'; exit 1; fi
 # Parse only connection settings as plain values; never execute .env as shell code.
 get_setting() { node --input-type=module -e 'import {readFileSync} from "node:fs"; import {parseEnv} from "node:util"; process.stdout.write(parseEnv(readFileSync(".env","utf8"))[process.argv[1]]||"")' "$1"; }

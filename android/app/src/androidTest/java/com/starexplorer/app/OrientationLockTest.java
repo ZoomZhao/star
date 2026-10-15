@@ -39,7 +39,7 @@ public class OrientationLockTest extends CompletionAnimationTest {
     assertEquals("com.starexplorer.app.testbed", context.getPackageName());
     client = new StarApi(context, "http://127.0.0.1:3004");
     JSONObject login = (JSONObject) client.call("/api/login", "POST", json("username", "child", "password", "child123"), false);
-    client.authenticate(login.getString("token"));
+    client.authenticate(login.getString("token"), login.getJSONObject("user").getString("id"));
     context.getSharedPreferences(MainActivity.class.getName(), 0).edit().remove("lockedOrientation").commit();
     scenario = ActivityScenario.launch(new Intent(context, MainActivity.class).putExtra("test_api", "http://127.0.0.1:3004"));
     waitFor(v -> text(v, "设置"));

@@ -27,6 +27,7 @@ import {
 } from './db.mjs';
 import { snapshot, restore } from './backup.mjs';
 import { registerTaskCardRoutes } from './task-cards.mjs';
+import { namedId } from './identity.mjs';
 const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -161,6 +162,24 @@ export function createApp(config = {}) {
     if (typeof k !== 'string' || !z.string().uuid().safeParse(k).success)
       fail(400, '缺少有效的操作编号，请重试');
     return req.user.id + ':' + k;
+  };
+  // Stable creation IDs make retries safe without adding a separate persistence table.
+  // Older clients may omit the key; each of their requests still creates a new record.
+  const createRecord = (req, table, fields, defaults = () => ({})) => {
+    const recordId = req.headers['idempotency-key']
+      ? namedId(`star-create:v1:${table}:${key(req)}`)
+      : uid();
+    return tx(db, () => {
+      const existing = get(db, `SELECT * FROM ${table} WHERE id=?`, recordId);
+      if (existing) {
+        if (Object.entries(fields).some(([name, value]) => existing[name] !== value))
+          fail(409, '操作编号已用于其他内容，请刷新后重试');
+        return existing;
+      }
+      const row = { ...fields, ...defaults(), id: recordId, created_at: now() };
+      insert(db, table, row);
+      return row;
+    });
   };
   const postLedger = ({
     entryId = uid(),
@@ -491,18 +510,17 @@ export function createApp(config = {}) {
     const c = child(req, req.params.childId);
     const v = ruleFields.parse(req.body);
     if (v.schedule === 'once' && v.on_date < today()) fail(400, '指定日期不能早于今天');
-    const row = {
-      ...v,
-      id: uid(),
-      rule_key: uid(),
-      child_id: c.id,
-      weekdays: JSON.stringify(v.weekdays),
-      effective_from: today(),
-      enabled: req.body.enabled === false ? 0 : 1,
-      version: 1,
-      created_at: now(),
-    };
-    insert(db, 'rules', row);
+    const row = createRecord(
+      req,
+      'rules',
+      {
+        ...v,
+        child_id: c.id,
+        weekdays: JSON.stringify(v.weekdays),
+        enabled: z.boolean().default(true).parse(req.body.enabled) ? 1 : 0,
+      },
+      () => ({ rule_key: uid(), effective_from: today(), version: 1 }),
+    );
     res.status(201).json(row);
   });
   app.patch('/api/rules/:ruleKey', (req, res) => {
@@ -520,20 +538,8 @@ export function createApp(config = {}) {
     if (v.schedule === 'once' && v.on_date < effective)
       fail(400, '模板变更从明日起生效，单日变更请编辑当日任务');
     tx(db, () => {
-      // A preview must not freeze tomorrow's template. Preserve explicit day edits
-      // (fields differ from their source version), today's snapshots and submissions.
-      run(
-        db,
-        `DELETE FROM tasks WHERE rule_key=? AND date>=?
-        AND NOT EXISTS (SELECT 1 FROM submissions s WHERE s.task_id=tasks.id)
-        AND EXISTS (SELECT 1 FROM rules r WHERE r.rule_key=tasks.rule_key
-          AND r.version=tasks.rule_version AND r.title=tasks.title
-          AND r.description=tasks.description AND r.icon=tasks.icon
-          AND r.subject=tasks.subject AND r.stars=tasks.stars
-          AND r.daily_limit=tasks.daily_limit)`,
-        old.rule_key,
-        effective,
-      );
+      // Every generated task is a saved snapshot, including future previews.
+      // New versions apply only when materialize creates a missing task.
       insert(db, 'rules', {
         ...old,
         ...v,
@@ -635,33 +641,33 @@ export function createApp(config = {}) {
     role(req, 'parent', 'admin');
     const c = child(req, req.params.childId),
       v = rewardFields.parse(req.body);
-    const row = {
+    const row = createRecord(req, 'rewards', {
       ...v,
-      id: uid(),
       family_id: c.family_id,
       active: v.active ? 1 : 0,
-      created_at: now(),
-    };
-    insert(db, 'rewards', row);
+    });
     res.status(201).json(row);
   });
   app.patch('/api/rewards/:rewardId', (req, res) => {
     role(req, 'parent', 'admin');
-    const r = get(db, 'SELECT * FROM rewards WHERE id=?', id.parse(req.params.rewardId));
-    if (!r) fail(404, '奖励不存在');
-    if (req.user.role === 'parent' && req.user.family_id !== r.family_id)
-      fail(403, '不能修改其他家庭奖励');
-    const v = rewardFields.parse(req.body);
-    run(
-      db,
-      'UPDATE rewards SET title=?,description=?,icon=?,cost=?,active=? WHERE id=?',
-      v.title,
-      v.description,
-      v.icon,
-      v.cost,
-      v.active ? 1 : 0,
-      r.id,
-    );
+    tx(db, () => {
+      const r = get(db, 'SELECT * FROM rewards WHERE id=?', id.parse(req.params.rewardId));
+      if (!r) fail(404, '奖励不存在');
+      if (req.user.role === 'parent' && req.user.family_id !== r.family_id)
+        fail(403, '不能修改其他家庭奖励');
+      // Merge inside the write transaction so a status toggle keeps the latest details.
+      const v = rewardFields.parse({ ...r, active: !!r.active, ...req.body });
+      run(
+        db,
+        'UPDATE rewards SET title=?,description=?,icon=?,cost=?,active=? WHERE id=?',
+        v.title,
+        v.description,
+        v.icon,
+        v.cost,
+        v.active ? 1 : 0,
+        r.id,
+      );
+    });
     res.json({ ok: true });
   });
   app.post('/api/children/:childId/redemptions', (req, res) => {
@@ -753,8 +759,7 @@ export function createApp(config = {}) {
   app.post('/api/admin/families', (req, res) => {
     role(req, 'admin');
     const { name } = z.object({ name: str }).parse(req.body);
-    const f = { id: uid(), name, created_at: now() };
-    insert(db, 'families', f);
+    const f = createRecord(req, 'families', { name });
     res.status(201).json(f);
   });
   app.post('/api/admin/users', (req, res) => {

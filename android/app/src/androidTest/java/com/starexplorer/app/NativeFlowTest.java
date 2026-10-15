@@ -91,7 +91,7 @@ public class NativeFlowTest {
       json("username", username, "password", password),
       false
     );
-    client.authenticate(r.getString("token"));
+    client.authenticate(r.getString("token"), r.getJSONObject("user").getString("id"));
   }
 
   void waitText(String text) throws Exception {

@@ -56,7 +56,7 @@ npm run android:build
 npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-产物为 `artifacts/star-explorer-native.apk`（0.3.2-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
+产物为 `artifacts/star-explorer-native.apk`（0.3.2-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 的界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现；Capacitor 依赖和配置已移除。
 
 发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 
@@ -83,7 +83,7 @@ npm run android:install   # 设备解锁并允许 USB 安装
 | parent | PARENT_PASSWORD | 审核任务、设置规则和奖励         |
 | child  | CHILD_PASSWORD  | 查看每日任务、提交完成、兑换奖励 |
 
-现有账号及密码保持不变，升级时已为小朋友补齐五科共 10 个模板；没有修改星星账本。预制内容见 `shared/task-templates.json`，家长可修改或停用。初始奖励为冰淇淋和玩具，规则和价格均可由家长修改。管理员可在预分配新账号时设置孩子称呼。
+预制内容见 `shared/task-templates.json`，仅在创建新孩子时初始化整套模板，家长可修改或停用。现有孩子升级时只允许补充明确指定的新任务，保留全部自定义规则与历史记录。新家庭的初始奖励为冰淇淋和玩具，规则和价格均可由家长修改。管理员可在预分配新账号时设置孩子称呼。
 
 连接参数 `ECS_HOST`、`ECS_USER`、`ECS_SSH_PORT`、`ECS_PASSWORD`、`DOMAIN` 位于 `.env`。SSH 密码通过 ASKPASS 读取，不作为命令参数或上传内容；服务端只接收应用所需环境变量。
 
@@ -96,7 +96,9 @@ npm run build
 node scripts/deploy-systemd.mjs
 ```
 
-部署脚本上传已构建前端、后端与纯 JS 运行依赖，切换 release，保留数据库与备份目录。当前运行时下载来自 Node.js / Caddy 官方发布，已验证 SHA-256 / SHA-512 校验和。
+systemd 与 Docker 更新脚本会先下载生产完整备份，在隔离数据库中验证可恢复后保存到本机 `artifacts/`，再开始上传和切换版本。服务恢复后再次备份，按记录 ID 比较既有规则的所有版本、每日任务、账号、提交、账本等全部字段。备份不可用时停止部署；发现差异时报告记录 ID，先排查用户并发操作，绝不自动用旧备份覆盖。备份文件权限为 600，含密码哈希，请妥善保管。这两个更新入口要求已有可访问的生产服务；首次初始化需另行配置。
+
+部署包使用项目锁文件安装纯 JS 运行依赖，保留服务器数据库与备份目录。当前运行时下载来自 Node.js / Caddy 官方发布，已验证 SHA-256 / SHA-512 校验和。
 
 ```sh
 node scripts/ecs-command.mjs 'systemctl status star star-web --no-pager'
@@ -114,7 +116,7 @@ node scripts/ecs-command.mjs 'journalctl -u star -n 50 --no-pager'
 - 家长可在任务规则中按科目上移、下移任务，立即同步到孩子端。排序单独存储并随备份恢复，不改变规则版本、任务快照或账本。
 
 - 语文、数学、英语各有「课内作业」，每天一次，基础 2 星。所有任务在家长审批或代完成时均可选择额外奖励 1 星，默认按基础星星发放；基础超过 1 星时还可选择少发 1 星（例如 2 星只发 1 星）。每次确认最低发放 1 星，额外奖励与少发不能同时选择，按实发数量结算、撤销。
-- 存量孩子通过 `node --env-file=/opt/star/server.env server/seed-homework.mjs` 补充三科课内作业，重复运行不会重复添加。
+- 存量孩子通过 `node --env-file=/opt/star/server.env server/seed-homework.mjs` 补充三科课内作业，重复运行不会重复添加。脚本在同一事务内先保存完整备份，备份失败则不添加。整套默认模板补齐脚本 `seed-subjects.mjs` 已停用，防止把用户改名的任务重新补回。
 
 - 北京时间自然日。孩子只能提交当天；家长可以代完成过去日期，不能预先完成未来任务。
 - 待审核 + 已通过次数共同占用每日上限；退回释放名额。每条提交只能审批一次。
@@ -122,16 +124,16 @@ node scripts/ecs-command.mjs 'journalctl -u star -n 50 --no-pager'
 - 模板修改从明天生效，只用于之后尚未生成的日期任务；已查看并生成的未来日期也保留其规则快照。
 - 已有任意提交记录的任务冻结规则。已记账记录不修改，撤销追加反向流水，保留审批记录及已完成次数。
 - 账本按任务归属日期记录任务收入；额外奖励、消费和撤销按操作当天记录。累计收支包含反向流水，因此它们是全部账目总额。
-- 任务提交、记账、兑换使用幂等编号，网络失败重试复用编号。服务端对重复审批和重复兑换结算也有唯一约束。
+- 任务提交、记账、兑换和新建规则、奖励、家庭使用幂等编号，网络失败重试复用编号。待确认请求按服务器与账号保存，同一账号重新登录后继续使用原编号；收到成功响应后才释放，其他账号不会接管。服务端对重复审批和重复兑换结算也有唯一约束。
 - Web 使用 localStorage 保留登录，Android 使用 Keystore AES-GCM 加密会话令牌后存入私有 Preferences；不保存明文密码。会话有效期为 180 天未使用，每日使用会续期。主动退出、更改密码、管理员停用/重置账号或恢复备份后重新登录。
-- 科目写入规则和每一天的任务快照，也包含在备份中。当前存量数据升级只补充科目和缺少的起步模板，账号、密码和账本保留。
+- 科目写入规则和每一天的任务快照，也包含在备份中。升级保留已有规则的全部版本、每日快照和自定义设置；新增字段只能使用明确迁移的默认值。设置看似回退时，应先核对版本、生效日期和当天快照，不改写历史来匹配新模板。
 - 第一版无需离线提交；失去网络时展示提示，恢复后重试。账本页面最多显示最近 1000 笔，完整历史始终包含在备份内。
 
 ## 备份与恢复
 
 使用 **Web 管理员账号 → 管理中心 → 备份与恢复** 下载 JSON 完整备份。文件包含密码哈希，不含明文密码和登录会话。
 
-恢复时选择备份、输入当前管理员密码、确认替换数据。系统先在隔离内存数据库校验版本、数据结构、外键和余额，再保存当前完整备份到 `BACKUP_DIR/before-restore-*.json`，最后在事务中替换数据。失败不修改现有数据；成功后使用备份内账号重新登录。上传上限 20MB。
+恢复时选择备份、输入当前管理员密码、确认替换数据。系统先在隔离内存数据库校验版本、数据结构、外键、任务来源版本和余额，再持有写事务保存当前完整备份到 `BACKUP_DIR/before-restore-*.json` 并替换数据，避免备份与替换之间遗漏其他连接写入。失败不修改现有数据；成功后使用备份内账号重新登录。上传上限 20MB。
 
 Docker 可选方案下取回自动保存的恢复前备份：
 
@@ -147,15 +149,16 @@ docker compose cp app:/app/backups/ ./recovery-backups/
 npm test             # 权限、次数上限、并发审批、规则快照、账本和恢复
 npm run test:e2e     # 浏览器端完整流程，独立内存数据库，不影响开发数据
 npm run build       # TypeScript + Web 生产构建
+npm run check       # 服务端测试 + Web 构建
 ```
 
-浏览器测试使用本机 Chrome，启动独立 3002 / 5174 端口。当前 28 项 API 测试、27 项浏览器流程通过，覆盖家长点选星星、次数上限、退回防误触及手机宽度。Android 0.2.4-native 构建、2 项布局单元测试、2 项网络恢复测试和 2 项 RefinementTest 流程通过；界面测试使用 2800×1840 / 400 dpi 专用模拟器和独立测试包。视觉预览见 `docs/design/native/IMPLEMENTATION.md`，本次家长端优化见 `docs/REVIEW-2026-09-13.md`，此前修复细节见 `docs/REVIEW-2026-09-08.md`。
+浏览器测试使用本机 Chrome，启动独立 3002 / 5174 端口。当前回归覆盖 API、完整备份、生产数据比较、预制任务升级，以及 35 项浏览器流程，包括自定义每日上限 10 次、未来快照保留、跨账号重试、延迟响应和新增记录去重。Android 使用独立内存 API、专用模拟器和独立测试包验证。完整结果与剩余实物验收范围见 [本轮项目 Review](docs/REVIEW-2026-10-15.md)。视觉预览见 `docs/design/native/IMPLEMENTATION.md`。
 
 设计图、生成提示词位于 `docs/design/`；界面截图位于 `docs/screenshots/`。原始 PNG 保留在设计目录，应用使用压缩 WebP。
 
 官方参考：[Android Views](https://developer.android.com/develop/ui/views/layout/declaring-layout)、[Node SQLite API](https://nodejs.org/docs/latest-v24.x/api/sqlite.html)。
 
-整体 Review 的修复、验证范围与后续建议见 [家长端体验 Review](docs/REVIEW-2026-09-13.md) 和 [系统 Review](docs/REVIEW-2026-09-08.md)。
+整体 Review 的修复、验证范围与后续建议见 [本轮项目 Review](docs/REVIEW-2026-10-15.md)；历史记录见 [家长端体验 Review](docs/REVIEW-2026-09-13.md) 和 [系统 Review](docs/REVIEW-2026-09-08.md)。
 
 ## 全新界面（0.3.0）
 
