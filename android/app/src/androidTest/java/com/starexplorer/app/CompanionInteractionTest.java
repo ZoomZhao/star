@@ -33,7 +33,7 @@ public class CompanionInteractionTest extends CompletionAnimationTest {
     assertEquals("com.starexplorer.app.testbed",context.getPackageName());
     client=new StarApi(context,"http://127.0.0.1:3004");
     JSONObject login=(JSONObject)client.call("/api/login","POST",json("username","child","password","child123"),false);
-    client.authenticate(login.getString("token"));
+    client.authenticate(login.getString("token"), login.getJSONObject("user").getString("id"));
     String path="/api/children/"+login.getJSONObject("user").getString("id")+"/dashboard";
     JSONObject before=(JSONObject)client.get(path);
     assertEquals(5,Skin.values().length);

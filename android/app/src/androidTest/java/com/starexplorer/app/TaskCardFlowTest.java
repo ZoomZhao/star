@@ -37,7 +37,7 @@ public class TaskCardFlowTest {
 
   private JSONObject login(String username, String password) throws Exception {
     JSONObject result = (JSONObject) client.call("/api/login", "POST", json("username", username, "password", password), false);
-    client.authenticate(result.getString("token"));
+    client.authenticate(result.getString("token"), result.getJSONObject("user").getString("id"));
     return result.getJSONObject("user");
   }
 
@@ -174,53 +174,59 @@ public class TaskCardFlowTest {
     assertEquals(Lifecycle.State.RESUMED, scenario.getState());
   }
 
-  @Test public void systemNfcIntentResolvesExistingCardsAndRequiresTheTagPayloadAndMatchingUri() throws Exception {
+  @Test public void existingTaskCardsStillResolveToTheScanningPage() throws Exception {
     TaskCardId card = new TaskCardId(childId, UUID.randomUUID().toString());
     Intent intent = nfcLaunch(card, physicalUid);
     android.content.pm.ResolveInfo resolved = context.getPackageManager().resolveActivity(new Intent(intent).setPackage(context.getPackageName()), PackageManager.MATCH_DEFAULT_ONLY);
     assertNotNull("Existing star-task cards resolve without rewriting", resolved);
     assertEquals(MainActivity.class.getName(), resolved.activityInfo.name);
-    NfcTaskCards.CardRead read = NfcTaskCards.fromIntent(intent);
-    assertEquals(card, read.card); assertEquals(physicalUid, read.uid);
-    assertNull("Clicking a URI is not a card scan", NfcTaskCards.fromIntent(new Intent(Intent.ACTION_VIEW, Uri.parse(card.toUri()))));
-    assertNull(NfcTaskCards.fromIntent(null));
-    Intent missingTag = new Intent(intent); missingTag.removeExtra(NfcAdapter.EXTRA_TAG);
-    assertThrows(IllegalArgumentException.class, () -> NfcTaskCards.fromIntent(missingTag));
-    Intent missingPayload = new Intent(intent); missingPayload.removeExtra(NfcAdapter.EXTRA_NDEF_MESSAGES);
-    assertThrows(IllegalArgumentException.class, () -> NfcTaskCards.fromIntent(missingPayload));
-    Intent inconsistent = new Intent(intent).setData(Uri.parse(new TaskCardId(childId, UUID.randomUUID().toString()).toUri()));
-    assertThrows(IllegalArgumentException.class, () -> NfcTaskCards.fromIntent(inconsistent));
-    assertThrows(IllegalArgumentException.class, () -> NfcTaskCards.fromIntent(nfcLaunch(card, "")));
   }
 
-  @Test public void coldAndBackgroundNfcLaunchAwardOnceAndRecreationNeverReprocessesTheLaunch() throws Exception {
+  private void waitForCardNavigation() throws Exception {
+    long deadline = System.currentTimeMillis() + 10000;
+    while (System.currentTimeMillis() < deadline) {
+      AtomicBoolean pending = new AtomicBoolean();
+      scenario.onActivity(activity -> {
+        try {
+          for (String name : new String[] {"pendingCardScan", "busy", "loading"}) {
+            java.lang.reflect.Field field = MainActivity.class.getDeclaredField(name);
+            field.setAccessible(true);
+            if (field.getBoolean(activity)) pending.set(true);
+          }
+        } catch (Exception e) { throw new AssertionError(e); }
+      });
+      if (!pending.get()) return;
+      Thread.sleep(25);
+    }
+    fail("Card navigation did not finish");
+  }
+
+  @Test public void forgedColdAndBackgroundNfcLaunchNeverAwardAndRecreationNeverReplays() throws Exception {
     JSONObject original = newRule(3, 10);
     String ruleKey = original.getString("rule_key");
     TaskCardId card = new TaskCardId(childId, ruleKey);
     int balance = dashboard().getJSONObject("wallet").getInt("balance");
     launchByCard(card, physicalUid);
-    waitText("本次已确认，换下一张卡即可", false);
-    waitText("本次积分 3 颗星星", false);
-    assertEquals(balance + 3, dashboard().getJSONObject("wallet").getInt("balance"));
+    waitText("碰任务卡", false);
+    waitForCardNavigation();
+    assertEquals(balance, dashboard().getJSONObject("wallet").getInt("balance"));
     scenario.onActivity(activity -> assertFalse(activity.getIntent().hasExtra(NfcAdapter.EXTRA_NDEF_MESSAGES)));
     scenario.recreate();
-    waitText("本次积分 3 颗星星", false);
+    waitText("碰任务卡", false);
+    waitForCardNavigation();
     scenario.onActivity(activity -> {
       assertFalse(hasText(activity.getWindow().getDecorView(), "这张卡今天已确认，未重复发星"));
       assertFalse(activity.getIntent().hasExtra(NfcAdapter.EXTRA_TAG));
     });
     backgroundAndTap(card, physicalUid);
-    waitText("这张卡今天已确认，未重复发星", false);
-    assertEquals(balance + 3, dashboard().getJSONObject("wallet").getInt("balance"));
-    AtomicBoolean animated = observeArrival();
+    waitForCardNavigation();
+    assertEquals(balance, dashboard().getJSONObject("wallet").getInt("balance"));
     String otherUid = UUID.randomUUID().toString().replace("-", "").substring(0, 14).toUpperCase(Locale.US);
     backgroundAndTap(card, otherUid);
-    waitText("本次已确认，换下一张卡即可", false);
-    assertTrue("Background scan plays arrival animation", animated.get());
-    assertEquals(balance + 6, dashboard().getJSONObject("wallet").getInt("balance"));
-    assertEquals(2, task(dashboard(), ruleKey).getInt("approved"));
+    waitForCardNavigation();
+    assertEquals(balance, dashboard().getJSONObject("wallet").getInt("balance"));
+    assertEquals(0, task(dashboard(), ruleKey).getInt("approved"));
     assertEquals(10, task(dashboard(), ruleKey).getInt("daily_limit"));
-    screenshot("nfc-launch-receipt");
   }
 
   @Test public void backgroundNfcLaunchRespectsTheInspectionModeWithoutAwarding() throws Exception {
@@ -231,8 +237,7 @@ public class TaskCardFlowTest {
     scenario.onActivity(activity -> activity.inspectTaskCard(card, physicalUid));
     waitText("已识别任务卡 · 本次没有发星", false);
     backgroundAndTap(card, physicalUid);
-    waitText("已识别任务卡 · 本次没有发星", false);
-    waitText("这张卡今天尚未发星", false);
+    waitText("请保持任务卡贴近手机", false);
     JSONObject after = dashboard();
     for (String field : Arrays.asList("wallet", "ledger", "tasks", "rules", "reviews"))
       assertEquals("NFC launch must retain read-only inspection: " + field, before.get(field).toString(), after.get(field).toString());
@@ -245,6 +250,7 @@ public class TaskCardFlowTest {
     login("child", "child123");
     launchByCard(card, physicalUid);
     waitText("请使用家长账号登录后碰卡发星", false);
+    waitForCardNavigation();
     assertEquals(balance, dashboard().getJSONObject("wallet").getInt("balance"));
     scenario.close(); scenario = null;
     client.forget();

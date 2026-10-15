@@ -5,7 +5,9 @@ import android.content.SharedPreferences;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.util.UUID;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 import org.json.*;
 
 /** Native HTTPS transport, no WebView or JavaScript bridge. Call off the main thread. */
@@ -14,23 +16,40 @@ public final class StarApi {
   public static class ApiException extends Exception {
 
     public final int status;
+    private final SessionStore.Session requestedSession;
 
-    public ApiException(int status, String message) {
+    private ApiException(int status, String message, SessionStore.Session requestedSession) {
       super(message);
       this.status = status;
+      this.requestedSession = requestedSession;
     }
   }
 
   private final String base;
   private final SessionStore store;
   private final SharedPreferences prefs;
-  private volatile String token;
+  private final PendingOperationStore operations;
+  private volatile SessionStore.Session session;
 
   public StarApi(Context c, String base) {
     this.base = base;
     store = new SessionStore(c, base);
-    token = store.read();
+    session = store.read();
     prefs = c.getSharedPreferences("star_requests", Context.MODE_PRIVATE);
+    operations = new PendingOperationStore(new PendingOperationStore.Storage() {
+      public Map<String, String> entries() {
+        Map<String, String> values = new HashMap<>();
+        for (Map.Entry<String, ?> entry : prefs.getAll().entrySet())
+          if (entry.getValue() instanceof String) values.put(entry.getKey(), (String) entry.getValue());
+        return values;
+      }
+      public boolean commit(Map<String, String> values, Set<String> removals) {
+        SharedPreferences.Editor edit = prefs.edit();
+        for (String key : removals) edit.remove(key);
+        for (Map.Entry<String, String> value : values.entrySet()) edit.putString(value.getKey(), value.getValue());
+        return edit.commit();
+      }
+    });
     // Upgrade the previous app's saved session once, without bundling its runtime.
     if (
       base.equals(com.starexplorer.app.BuildConfig.API_BASE_URL) &&
@@ -39,9 +58,9 @@ public final class StarApi {
       SharedPreferences legacy = c.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
       String saved = legacy.getString("star-token", "");
       try {
-        if (token.isEmpty() && !saved.isEmpty()) {
-          store.save(saved);
-          token = saved;
+        if (session.token.isEmpty() && !saved.isEmpty()) {
+          store.save(saved, "");
+          session = new SessionStore.Session(saved, "");
         }
         legacy.edit().remove("star-token").commit();
         prefs.edit().putBoolean("legacy-imported", true).commit();
@@ -52,17 +71,47 @@ public final class StarApi {
   }
 
   public boolean hasSession() {
-    return !token.isEmpty();
+    return !session.token.isEmpty();
   }
 
-  public void authenticate(String token) throws Exception {
-    store.save(token);
-    this.token = token;
+  /** Session identity also acts as a generation, without exposing the login token to callers. */
+  public boolean isCurrentSession(ApiException failure) {
+    return failure.requestedSession == session;
   }
 
-  public void forget() {
-    token = "";
+  public synchronized void authenticate(String token, String userId) throws Exception {
+    if (token.isEmpty() || userId.isEmpty()) throw new IllegalArgumentException("登录信息不完整");
+    operations.migrateLegacy(base, token, userId);
+    store.save(token, userId);
+    session = new SessionStore.Session(token, userId);
+  }
+
+  public synchronized void forget() {
+    session = new SessionStore.Session("", "");
     store.clear();
+  }
+
+  /** Capture before local logout; this best-effort request never changes the current session. */
+  public Runnable prepareLogout() {
+    SessionStore.Session current = session;
+    return () -> {
+      if (current.token.isEmpty()) return;
+      try {
+        call("/api/logout", "POST", json(), false, current);
+      } catch (Exception ignored) {
+        // Local logout is already complete, even if this session cannot be revoked online.
+      }
+    };
+  }
+
+  public JSONObject resumeSession() throws Exception {
+    SessionStore.Session current = session;
+    JSONObject user = (JSONObject) call("/api/me", "GET", null, false, current);
+    synchronized (this) {
+      if (session != current) throw new IOException("登录状态已变化，请重试");
+      authenticate(current.token, user.getString("id"));
+    }
+    return user;
   }
 
   public Object get(String path) throws Exception {
@@ -71,16 +120,14 @@ public final class StarApi {
 
   public Object call(String path, String method, JSONObject body, boolean idempotent)
     throws Exception {
-    String signature =
-      base + ":" + token.hashCode() + ":" + method + ":" + path + ":" + String.valueOf(body);
-    String operation = null;
-    if (idempotent) {
-      operation = prefs.getString(signature, null);
-      if (operation == null) {
-        operation = UUID.randomUUID().toString();
-        prefs.edit().putString(signature, operation).commit();
-      }
-    }
+    return call(path, method, body, idempotent, session);
+  }
+
+  private Object call(String path, String method, JSONObject body, boolean idempotent,
+    SessionStore.Session current) throws Exception {
+    String payload = String.valueOf(body);
+    PendingOperationStore.Operation operation = idempotent
+      ? operations.begin(base, current.userId, method, path, payload) : null;
     HttpURLConnection connection = null;
     try {
       connection = (HttpURLConnection) new URL(base + path).openConnection();
@@ -89,13 +136,13 @@ public final class StarApi {
       connection.setRequestMethod(method);
       connection.setInstanceFollowRedirects(false);
       connection.setRequestProperty("Accept", "application/json");
-      if (!token.isEmpty()) connection.setRequestProperty("Authorization", "Bearer " + token);
-      if (operation != null) connection.setRequestProperty("Idempotency-Key", operation);
+      if (!current.token.isEmpty()) connection.setRequestProperty("Authorization", "Bearer " + current.token);
+      if (operation != null) connection.setRequestProperty("Idempotency-Key", operation.id);
       if (body != null) {
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         try (OutputStream stream = connection.getOutputStream()) {
-          stream.write(body.toString().getBytes(StandardCharsets.UTF_8));
+          stream.write(payload.getBytes(StandardCharsets.UTF_8));
         }
       }
       int status = connection.getResponseCode();
@@ -103,15 +150,16 @@ public final class StarApi {
         status >= 400 ? connection.getErrorStream() : connection.getInputStream();
       String value = readText(stream, 25 * 1024 * 1024);
       Object result = new JSONTokener(value).nextValue();
-      // A 5xx response may follow a successful commit behind a gateway. Keep the
-      // same operation identifier so retrying cannot award or spend stars twice.
-      if (idempotent && status < 500) prefs.edit().remove(signature).apply();
+      // Neither an authentication failure nor a gateway error resolves an earlier
+      // uncertain result. Keep its identity until success is actually confirmed.
       if (status < 200 || status >= 300) throw new ApiException(
         status,
         result instanceof JSONObject
           ? ((JSONObject) result).optString("error", "操作未完成")
-          : "服务器响应异常"
+          : "服务器响应异常",
+        current
       );
+      if (operation != null) operations.complete(operation);
       return result;
     } catch (SocketTimeoutException | UnknownHostException | ConnectException e) {
       throw new IOException("暂时连接不上服务器，请检查网络后重试");

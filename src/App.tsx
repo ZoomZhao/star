@@ -56,8 +56,7 @@ import {
   Shapes,
   Power,
 } from 'lucide-react';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { api, initToken, saveToken, requestId, isNative, serverUrl, setServerUrl } from './api';
+import { api, saveToken, requestId, endSession, getSessionVersion } from './api';
 import presets from '../shared/task-templates.json';
 const SKINS = [
   {
@@ -200,16 +199,25 @@ function Login({ done }: { done: (u: User) => void }) {
     [password, setPassword] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [demo, setDemo] = useState(false),
-    [url, setUrl] = useState(serverUrl()),
-    [config, setConfig] = useState(isNative && !serverUrl());
+    [demo, setDemo] = useState(false);
+  const active = useRef(true),
+    working = useRef(false);
   useEffect(() => {
+    active.current = true;
     api<{ demo: boolean }>('/api/config')
-      .then((r) => setDemo(r.demo))
+      .then((r) => {
+        if (active.current) setDemo(r.demo);
+      })
       .catch(() => {});
+    return () => {
+      active.current = false;
+    };
   }, []);
   async function login(e?: FormEvent, u = username, p = password) {
     e?.preventDefault();
+    if (working.current) return;
+    working.current = true;
+    const version = getSessionVersion();
     setBusy(true);
     setError('');
     try {
@@ -217,12 +225,14 @@ function Login({ done }: { done: (u: User) => void }) {
         username: u,
         password: p,
       });
-      await saveToken(r.token);
+      if (!active.current || version !== getSessionVersion()) return;
+      saveToken(r.token, r.user.id);
       done(r.user);
     } catch (e) {
-      setError((e as Error).message);
+      if (active.current && version === getSessionVersion()) setError((e as Error).message);
     } finally {
-      setBusy(false);
+      working.current = false;
+      if (active.current) setBusy(false);
     }
   }
   return (
@@ -298,37 +308,6 @@ function Login({ done }: { done: (u: User) => void }) {
               </div>
             </div>
           )}
-          {isNative && (
-            <Button className="text-btn" onClick={() => setConfig(!config)}>
-              配置服务器地址
-            </Button>
-          )}
-          {config && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                try {
-                  setServerUrl(url);
-                  setConfig(false);
-                  setError('');
-                  api<{ demo: boolean }>('/api/config')
-                    .then((r) => setDemo(r.demo))
-                    .catch((e) => setError(e.message));
-                } catch (e) {
-                  setError((e as Error).message);
-                }
-              }}
-            >
-              <Field label="服务器 HTTPS 地址">
-                <input
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://stars.example.com"
-                />
-              </Field>
-              <Button className="secondary full">保存地址</Button>
-            </form>
-          )}
         </div>
         <small className="login-footer">小小的坚持，大大的成长 🌱</small>
       </section>
@@ -385,41 +364,73 @@ export default function App() {
       onChange={setSubject}
     />
   );
-  const working = useRef(false),
+  const working = useRef<object | null>(null),
     lastBalance = useRef<number | null>(null),
     observedToday = useRef(currentDate()),
     fetchVersion = useRef(0),
     dashboardSnapshot = useRef('');
+  const sessionVersion = getSessionVersion();
+  const contextKey = JSON.stringify([sessionVersion, user?.id, childId, date]);
+  const context = useRef({ key: contextKey });
+  if (context.current.key !== contextKey) context.current = { key: contextKey };
+  const currentContext = context.current;
+  const isCurrentContext = useCallback(
+    () => context.current === currentContext && sessionVersion === getSessionVersion(),
+    [currentContext, sessionVersion],
+  );
+  const resetSession = useCallback(() => {
+    context.current = { key: '' };
+    fetchVersion.current++;
+    dashboardSnapshot.current = '';
+    working.current = null;
+    setBusy(false);
+    setUser(null);
+    setData(null);
+    setChildren([]);
+    setChildrenLoaded(false);
+    setChildId('');
+    setDate(currentDate());
+    setDialog(null);
+    setSkinOpen(false);
+    setError('');
+    setNotice('');
+    setCheer('');
+  }, []);
   const isParent = user?.role === 'parent' || user?.role === 'admin';
   useEffect(() => {
-    initToken()
-      .then(() => api<User>('/api/me'))
-      .then(setUser)
+    let active = true;
+    const version = getSessionVersion();
+    api<User>('/api/me')
+      .then((u) => {
+        if (active && version === getSessionVersion()) setUser(u);
+      })
       .catch(() => {})
-      .finally(() => setLoading(false));
-    const reset = () => {
-      fetchVersion.current++;
-      dashboardSnapshot.current = '';
-      setUser(null);
-      setData(null);
-      setChildren([]);
-      setChildId('');
-      setDialog(null);
-    };
-    window.addEventListener('star-session-expired', reset);
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    window.addEventListener('star-session-expired', resetSession);
     const on = () => setOnline(true),
       off = () => setOnline(false);
     window.addEventListener('online', on);
     window.addEventListener('offline', off);
     return () => {
-      window.removeEventListener('star-session-expired', reset);
+      active = false;
+      window.removeEventListener('star-session-expired', resetSession);
       window.removeEventListener('online', on);
       window.removeEventListener('offline', off);
     };
-  }, []);
+  }, [resetSession]);
+  useEffect(() => {
+    working.current = null;
+    setBusy(false);
+    setError('');
+    setNotice('');
+    setDialog(null);
+  }, [currentContext]);
   useEffect(() => {
     if (!user) return;
     let active = true;
+    const version = getSessionVersion();
     setChildrenLoaded(false);
     setError('');
     setPage(user.role === 'admin' ? 'admin' : 'today');
@@ -429,47 +440,58 @@ export default function App() {
     lastBalance.current = null;
     api<User[]>('/api/children')
       .then((cs) => {
-        if (!active) return;
+        if (!active || version !== getSessionVersion()) return;
         setChildren(cs);
         setChildrenLoaded(true);
         setChildId(cs[0]?.id || '');
       })
       .catch((e) => {
-        if (active) setError(e.message);
+        if (active && version === getSessionVersion()) setError(e.message);
       });
     return () => {
       active = false;
     };
   }, [user, childrenRetry]);
-  const refresh = useCallback(async () => {
-    if (!user) return;
-    if (!childId) {
-      setChildrenRetry((n) => n + 1);
-      return;
-    }
-    const n = ++fetchVersion.current;
-    const d = await api<Dashboard>(`/api/children/${childId}/dashboard?date=${date}`);
-    if (n !== fetchVersion.current) return;
-    const snapshot = JSON.stringify(d);
-    if (snapshot !== dashboardSnapshot.current) {
-      dashboardSnapshot.current = snapshot;
-      setData(d);
-    }
-    setError('');
-    if (
-      lastBalance.current !== null &&
-      d.wallet.balance > lastBalance.current &&
-      user?.role === 'child'
-    ) {
-      setNotice(`收到 ${d.wallet.balance - lastBalance.current} 颗星星！你的努力被看见啦 ✨`);
-    }
-    lastBalance.current = d.wallet.balance;
-  }, [childId, date, user]);
+  const refresh = useCallback(
+    async (reportError = false) => {
+      if (!user || !isCurrentContext()) return false;
+      if (user.role === 'admin') return true;
+      if (!childId) {
+        setChildrenRetry((n) => n + 1);
+        return true;
+      }
+      const n = ++fetchVersion.current;
+      try {
+        const d = await api<Dashboard>(`/api/children/${childId}/dashboard?date=${date}`);
+        if (!isCurrentContext() || n !== fetchVersion.current) return false;
+        const snapshot = JSON.stringify(d);
+        if (snapshot !== dashboardSnapshot.current) {
+          dashboardSnapshot.current = snapshot;
+          setData(d);
+        }
+        setError('');
+        if (
+          lastBalance.current !== null &&
+          d.wallet.balance > lastBalance.current &&
+          user.role === 'child'
+        ) {
+          setNotice(`收到 ${d.wallet.balance - lastBalance.current} 颗星星！你的努力被看见啦 ✨`);
+        }
+        lastBalance.current = d.wallet.balance;
+        return true;
+      } catch (e) {
+        if (reportError && isCurrentContext() && n === fetchVersion.current)
+          setError((e as Error).message);
+        return false;
+      }
+    },
+    [childId, date, user, isCurrentContext],
+  );
   useEffect(() => {
     setData(null);
     dashboardSnapshot.current = '';
     lastBalance.current = null;
-    if (childId) refresh().catch((e) => setError(e.message));
+    if (childId) void refresh(true);
     return () => {
       fetchVersion.current++;
     };
@@ -491,7 +513,7 @@ export default function App() {
         setDate(now);
         return;
       }
-      refresh().catch(() => {});
+      void refresh();
     };
     const t = setInterval(tick, 20000);
     window.addEventListener('focus', tick);
@@ -505,20 +527,12 @@ export default function App() {
     };
   }, [user, childId, refresh, date, dialog]);
   async function logout() {
-    await api('/api/logout', 'POST').catch(() => {});
-    await saveToken('');
-    fetchVersion.current++;
-    setUser(null);
-    setData(null);
-    dashboardSnapshot.current = '';
-    setChildren([]);
-    setChildId('');
-    setDate(currentDate());
-    setDialog(null);
-    setError('');
+    if (!isCurrentContext()) return;
+    const revoke = endSession();
+    resetSession();
+    await revoke;
   }
   function feedback() {
-    if (isNative) Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
     if (sound) {
       try {
         const ctx = new AudioContext();
@@ -540,21 +554,27 @@ export default function App() {
     }
   }
   async function act(fn: () => Promise<unknown>, message?: string) {
-    if (working.current) return false;
-    working.current = true;
+    if (working.current || !isCurrentContext()) return false;
+    const operation = {};
+    working.current = operation;
     setBusy(true);
     setError('');
     try {
       await fn();
-      await refresh().catch(() => setNotice('操作已保存，暂时未能刷新页面，请稍后刷新'));
-      if (message) setNotice(message);
+      if (!isCurrentContext()) return false;
+      const refreshed = await refresh();
+      if (!isCurrentContext()) return false;
+      if (!refreshed) setNotice('操作已保存，暂时未能刷新页面，请稍后刷新');
+      else if (message) setNotice(message);
       return true;
     } catch (e) {
-      setError((e as Error).message);
+      if (isCurrentContext()) setError((e as Error).message);
       return false;
     } finally {
-      working.current = false;
-      setBusy(false);
+      if (working.current === operation) {
+        working.current = null;
+        if (isCurrentContext()) setBusy(false);
+      }
     }
   }
   async function submitTask(task: Task, note: string, unitStars = task.stars, quantity = 1) {
@@ -718,10 +738,7 @@ export default function App() {
                 </option>
               ))}
             </select>
-            <Button
-              className="text-btn"
-              onClick={() => refresh().catch((e) => setError(e.message))}
-            >
+            <Button className="text-btn" onClick={() => refresh(true)}>
               <RefreshCw size={15} /> 刷新
             </Button>
           </div>
@@ -742,10 +759,7 @@ export default function App() {
             <StarIcon size={38} />
             <p>正在寻找今天的星星…</p>
             {error && (
-              <Button
-                className="secondary"
-                onClick={() => refresh().catch((e) => setError(e.message))}
-              >
+              <Button className="secondary" onClick={() => refresh(true)}>
                 重新加载
               </Button>
             )}
@@ -1260,10 +1274,6 @@ export default function App() {
                                 act(
                                   () =>
                                     api(`/api/rewards/${r.id}`, 'PATCH', {
-                                      title: r.title,
-                                      description: r.description,
-                                      icon: r.icon,
-                                      cost: r.cost,
                                       active: !r.active,
                                     }),
                                   r.active ? '奖励已下架' : '奖励已上架',
@@ -1619,6 +1629,7 @@ export default function App() {
                             : `/api/children/${childId}/rules`,
                         d.task || d.rule ? 'PATCH' : 'POST',
                         v,
+                        d.task || d.rule ? undefined : requestId(),
                       ),
                     '规则已保存',
                   );
@@ -1638,6 +1649,7 @@ export default function App() {
                         r ? `/api/rewards/${r.id}` : `/api/children/${childId}/rewards`,
                         r ? 'PATCH' : 'POST',
                         v,
+                        r ? undefined : requestId(),
                       ),
                     '奖励已保存',
                   );
@@ -2804,7 +2816,7 @@ function AdminPanel({
                   await perform(
                     'family',
                     async () => {
-                      family = await api('/api/admin/families', 'POST', { name });
+                      family = await api('/api/admin/families', 'POST', { name }, requestId());
                     },
                     '家庭已创建',
                   )

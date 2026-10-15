@@ -28,33 +28,21 @@ try {
       if (!r.ok) throw Error('API ' + r.status);
       return r.json();
     };
-    const children = await get('/api/children'),
-      presets = await get('/api/task-templates');
-    const dashboards = [];
-    for (const c of children) {
-      const d = await get('/api/children/' + c.id + '/dashboard');
-      dashboards.push({
-        tasks: d.tasks.length,
-        subjects: [...new Set(d.tasks.map((t) => t.subject))].sort(),
-        rules: d.rules.length,
-        homework: d.tasks
-          .filter((t) => t.title === '课内作业')
-          .map((t) => ({ subject: t.subject, stars: t.stars, daily_limit: t.daily_limit })),
-      });
-    }
-    return { presetCount: presets.length, dashboards };
+    const presets = await get('/api/task-templates');
+    // Dashboard GET creates daily snapshots. Inspect the backup instead, and never
+    // assume an existing family's rules still match the default template catalog.
+    const backup = await get('/api/admin/backup');
+    if (backup.format !== 'star-explorer') throw Error('完整备份格式错误');
+    return {
+      presetCount: presets.length,
+      subjects: [...new Set(presets.map((preset) => preset.subject))].sort(),
+      children: backup.data.users.filter((user) => user.role === 'child').length,
+      rules: backup.data.rules.length,
+      snapshots: backup.data.tasks.length,
+      customTenCaps: backup.data.rules.filter((rule) => rule.daily_limit === 10).length,
+    };
   });
-  if (
-    result.presetCount !== 13 ||
-    result.dashboards.some(
-      (d) =>
-        d.subjects.length !== 5 ||
-        d.homework.length !== 3 ||
-        new Set(d.homework.map((t) => t.subject)).size !== 3 ||
-        d.homework.some((t) => t.stars !== 2 || t.daily_limit !== 1),
-    )
-  )
-    throw Error('科目模板检查失败');
+  if (result.presetCount !== 13 || result.subjects.length !== 5) throw Error('科目模板检查失败');
   for (const key of ['chinese', 'math', 'english', 'sports', 'other']) {
     const r = await context.request.get(origin + '/assets/subjects/' + key + '.webp');
     if (!r.ok()) throw Error('科目图片缺失');

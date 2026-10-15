@@ -26,7 +26,7 @@ public class RefinementTest extends CompletionAnimationTest {
       json("username", username, "password", password),
       false
     );
-    client.authenticate(result.getString("token"));
+    client.authenticate(result.getString("token"), result.getJSONObject("user").getString("id"));
   }
 
   private void clickLabel(String label) {

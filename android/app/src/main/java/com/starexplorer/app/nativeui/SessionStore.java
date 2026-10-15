@@ -14,6 +14,12 @@ import javax.crypto.spec.GCMParameterSpec;
 
 public final class SessionStore {
 
+  public static final class Session {
+    public final String token;
+    public final String userId;
+    public Session(String token, String userId) { this.token = token; this.userId = userId; }
+  }
+
   private final SharedPreferences prefs;
   private final String realm;
   private static final String ALIAS = "star-native-session-v1";
@@ -45,10 +51,10 @@ public final class SessionStore {
     return (SecretKey) ks.getKey(ALIAS, null);
   }
 
-  public String read() {
+  public Session read() {
     try {
       String value = prefs.getString(realm, "");
-      if (value.isEmpty()) return "";
+      if (value.isEmpty()) return new Session("", "");
       String[] pair = value.split(":");
       Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
       cipher.init(
@@ -56,17 +62,18 @@ public final class SessionStore {
         key(),
         new GCMParameterSpec(128, Base64.decode(pair[0], Base64.NO_WRAP))
       );
-      return new String(
+      String token = new String(
         cipher.doFinal(Base64.decode(pair[1], Base64.NO_WRAP)),
         StandardCharsets.UTF_8
       );
+      return new Session(token, prefs.getString(realm + ":user", ""));
     } catch (Exception e) {
       clear();
-      return "";
+      return new Session("", "");
     }
   }
 
-  public void save(String token) throws Exception {
+  public void save(String token, String userId) throws Exception {
     Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
     cipher.init(Cipher.ENCRYPT_MODE, key());
     byte[] value = cipher.doFinal(token.getBytes(StandardCharsets.UTF_8));
@@ -78,11 +85,12 @@ public final class SessionStore {
           ":" +
           Base64.encodeToString(value, Base64.NO_WRAP)
       )
+      .putString(realm + ":user", userId)
       .commit();
     if (!saved) throw new java.io.IOException("无法保存登录状态，请检查设备存储空间");
   }
 
   public void clear() {
-    prefs.edit().remove(realm).commit();
+    prefs.edit().remove(realm).remove(realm + ":user").commit();
   }
 }

@@ -1,28 +1,19 @@
 package com.starexplorer.app.nativeui;
 
 import android.app.Activity;
-import android.content.Intent;
 import android.net.Uri;
 import android.nfc.*;
 import android.nfc.tech.Ndef;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.Parcelable;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Foreground NFC reader plus validation of system tag-launch intents. */
+/** Foreground reader: only tags delivered by the platform reader callback enter this class. */
 public final class NfcTaskCards {
-  public static final class CardRead {
-    public final TaskCardId card;
-    public final String uid;
-    public final Tag tag;
-    CardRead(TaskCardId card, String uid, Tag tag) { this.card = card; this.uid = uid; this.tag = tag; }
-  }
-
   public interface Callback {
     void read(TaskCardId card, String cardUid);
     void written();
@@ -53,24 +44,6 @@ public final class NfcTaskCards {
   public boolean supported() { return adapter != null; }
   public boolean enabled() { return adapter != null && adapter.isEnabled(); }
   public boolean active() { return session != null; }
-
-  // A URI alone is never an award request. Require the NFC action, payload and physical tag.
-  public static CardRead fromIntent(Intent intent) {
-    if (intent == null || !NfcAdapter.ACTION_NDEF_DISCOVERED.equals(intent.getAction())) return null;
-    Parcelable[] messages = intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES);
-    Parcelable physicalTag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
-    if (messages == null || messages.length != 1 || !(messages[0] instanceof NdefMessage) || !(physicalTag instanceof Tag))
-      throw new IllegalArgumentException("未收到完整的任务卡信息，请移开卡片后重新碰卡");
-    TaskCardId card = decode((NdefMessage) messages[0]);
-    if (!card.toUri().equals(intent.getDataString()))
-      throw new IllegalArgumentException("任务卡信息不一致，请重新碰卡");
-    return new CardRead(card, physicalUid(((Tag) physicalTag).getId()), (Tag) physicalTag);
-  }
-
-  public void ignoreUntilRemoved(Tag tag) {
-    if (adapter != null) try { adapter.ignore(tag, 500, null, main); }
-    catch (RuntimeException ignored) { /* Server-side daily deduplication still applies. */ }
-  }
 
   public static String physicalUid(byte[] id) {
     if (id == null || (id.length != 4 && id.length != 7 && id.length != 10))
