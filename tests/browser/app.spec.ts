@@ -10,7 +10,9 @@ async function login(page: any, role = 'child') {
     .click();
   await expect(page.getByRole('button', { name: '设置', exact: true })).toBeVisible();
 }
-test('home keeps NFC tools in more and shows compact progress beside larger task titles', async ({ page }) => {
+test('home keeps NFC tools in more and shows compact progress beside larger task titles', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page, 'parent');
   await expect(page.getByRole('button', { name: '碰卡发星', exact: true })).toHaveCount(0);
@@ -18,7 +20,9 @@ test('home keeps NFC tools in more and shows compact progress beside larger task
   const task = page.locator('.task-card').first();
   await expect(task.locator('.task-title .task-count')).toHaveText(/^\d+\/\d+$/);
   await expect(task).not.toContainText('次已完成');
-  expect(await task.locator('.task-title').evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
+  expect(
+    await task.locator('.task-title').evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+  ).toBeGreaterThanOrEqual(16);
   await page.getByRole('button', { name: '更多', exact: true }).click();
   await expect(page.getByRole('button', { name: '检测卡片', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '碰卡发星', exact: true }).click();
@@ -216,7 +220,7 @@ test('parent can edit a pending reward, take it off sale and put it back', async
 }) => {
   await login(page, 'parent');
   await page.getByRole('button', { name: '奖励小铺', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '奖励小铺管理', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '心愿小铺', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '添加奖励', exact: true }).click();
   const title = '家长管理奖励 ' + Date.now();
   await page.getByLabel('奖励名称', { exact: true }).fill(title);
@@ -246,13 +250,22 @@ test('parent can edit a pending reward, take it off sale and put it back', async
   await expect(card).toContainText('家长修改的说明');
   await card.getByRole('button', { name: '下架奖励', exact: true }).click();
   await expect(card).toContainText('已下架');
-  await page.getByLabel('奖励状态', { exact: true }).selectOption('active');
+  await page
+    .getByRole('group', { name: '奖励状态' })
+    .getByRole('button', { name: /^已上架/ })
+    .click();
   await expect(card).toHaveCount(0);
-  await page.getByLabel('奖励状态', { exact: true }).selectOption('inactive');
+  await page
+    .getByRole('group', { name: '奖励状态' })
+    .getByRole('button', { name: /^已下架/ })
+    .click();
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: '重新上架', exact: true }).click();
   await expect(card).toHaveCount(0);
-  await page.getByLabel('奖励状态', { exact: true }).selectOption('active');
+  await page
+    .getByRole('group', { name: '奖励状态' })
+    .getByRole('button', { name: /^已上架/ })
+    .click();
   await expect(card).toContainText('已上架');
   await page.getByRole('button', { name: '审核兑换申请', exact: true }).click();
   await expect(page.getByRole('heading', { name: '看看孩子的努力' })).toBeVisible();

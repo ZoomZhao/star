@@ -985,92 +985,9 @@ img {
 .negative {
   color: #ba665b;
 }
-.shop-banner {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border: 1px solid #f2e3b0;
-  border-radius: 24px;
-  padding: 18px;
-  margin-bottom: 16px;
-  background: #fff4cf;
-}
-.shop-banner h3 {
-  font-size: 19px;
-}
-.shop-banner p {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 6px;
-}
-.shop-gift {
-  font-size: 28px;
-  flex-shrink: 0;
-}
-.shop-gift span {
-  font-size: 13px;
-}
-.rewards-grid,
 .rules-grid {
   display: grid;
   gap: 12px;
-}
-.reward-card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  padding: 16px;
-}
-.reward-card h3 {
-  margin: 10px 0 5px;
-  font-size: 17px;
-}
-.reward-card > p {
-  font-size: 12px;
-  color: var(--muted);
-}
-.reward-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 16px;
-}
-.reward-bottom strong {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 21px;
-}
-.reward-bottom button {
-  font-size: 12px;
-  padding-inline: 14px;
-}
-.reward-management {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin-bottom: 15px;
-}
-.reward-management label {
-  font-size: 12px;
-}
-.reward-management select {
-  max-width: 160px;
-  font-size: 13px;
-  margin-left: 8px;
-}
-.reward-management p {
-  color: var(--muted);
-  font-size: 12px;
-}
-.reward-status-action {
-  font-size: 12px;
-  margin-top: 10px;
-}
-.redemption-list {
-  margin-top: 18px;
 }
 .list-row {
   display: flex;

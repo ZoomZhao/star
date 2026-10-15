@@ -562,9 +562,13 @@ public class MainActivity extends AppCompatActivity {
     root.addView(shell, new FrameLayout.LayoutParams(-1, -1));
     LinearLayout header = ui.row();
     LinearLayout identity = ui.col();
-    ui.add(identity, ui.text(admin() ? "管理中心" : parent() ? selectedChildName() + "的成长日" : user.optString("name") + "的星星日", 21, true), -2);
+    TextView identityTitle = ui.text(admin() ? "管理中心" : parent() ? selectedChildName() + "的成长日" : user.optString("name") + "的星星日", 21, true);
+    ui.ellipsis(identityTitle, 1);
+    ui.add(identity, identityTitle, -2);
     ui.gap(identity, 3);
-    ui.add(identity, ui.label(admin() ? "家庭与账号管理" : "小小行动，慢慢发光"), -2);
+    TextView identityHint = ui.label(admin() ? "家庭与账号管理" : "小小行动，慢慢发光");
+    ui.ellipsis(identityHint, 1);
+    ui.add(identity, identityHint, -2);
     header.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
     if (data != null && !admin()) {
       TextView balance = ui.button("星星 " + data.optJSONObject("wallet").optInt("balance"), false, () -> navigate("wallet"));
@@ -575,7 +579,8 @@ public class MainActivity extends AppCompatActivity {
     LinearLayout settingsIcon = ui.iconBox("Settings", 21);
     settingsIcon.setContentDescription("设置"); settingsIcon.setFocusable(true); settingsIcon.setOnClickListener(v -> settings());
     header.addView(settingsIcon, ui.lp(44, 44));
-    ui.add(shell, header, 56);
+    header.setMinimumHeight(ui.dp(56));
+    ui.add(shell, header, -2);
     ui.gap(shell, 8);
     if (!error.isEmpty()) {
       ui.add(shell, ui.button(error + " · 重试", false, () -> refresh(true)), 48);
@@ -1859,234 +1864,256 @@ public class MainActivity extends AppCompatActivity {
     return -1;
   }
 
-  private void shop(LinearLayout main) {
-    if (parent()) title(main, "奖励小铺管理", () -> rewardForm(null));
-    LinearLayout top = ui.row();
-    LinearLayout intro = ui.col();
-    ui.add(intro, ui.text("让努力，变成小心愿", 17, true), -2);
-    ui.gap(intro, 6);
-    ui.add(intro, ui.label("家长确认兑换后扣除星星"), -2);
-    top.addView(intro, new LinearLayout.LayoutParams(0, -2, 1));
-    top.addView(
-      ui.button("兑换记录", false, () -> {
-        LinearLayout f = form();
-        JSONArray a = array(data, "redemptions");
-        if (a.length() == 0) ui.line(f, "还没有兑换记录");
-        for (int i = 0; i < a.length(); i++) {
-          JSONObject r = obj(a, i);
-          ui.line(
-            f,
-            r.optString("title") +
-              " · " +
-              r.optInt("cost") +
-              " 星\n" +
-              status(r.optString("status")) +
-              " " +
-              r.optString("review_note")
-          );
-        }
-        dialog("我的兑换记录", f, null, null);
-      })
-    );
-    ui.add(main, top, 64);
-    ui.gap(main, 10);
-    if (parent()) {
-      LinearLayout filters = ui.row();
-      String[] keys = { "all", "active", "inactive" },
-        labels = { "全部奖励", "已上架", "已下架" };
-      for (int i = 0; i < 3; i++) {
-        String key = keys[i];
-        filters.addView(
-          ui.button(labels[i], rewardFilter.equals(key), () -> {
-            rewardFilter = key;
-            regionOffsets.remove("shop:" + childId + ":" + key);
-            render();
-          }),
-          new LinearLayout.LayoutParams(0, ui.dp(48), 1)
-        );
-        if (i < 2) ui.gap(filters, 8);
-      }
-      ui.add(main, filters, 54);
-      ui.gap(main, 6);
+  private String wishIconName(String key) {
+    switch (key) {
+      case "icecream": return "IceCreamBowl";
+      case "toy": return "Gamepad2";
+      case "movie": return "Clapperboard";
+      case "picnic": return "TentTree";
+      default: return "Gift";
     }
+  }
+
+  private LinearLayout wishIcon(String key, int size) {
+    LinearLayout icon = ui.iconBox(wishIconName(key), size / 2);
+    int color = key.equals("icecream") ? 0xFFFAEAF2 : key.equals("toy") ? 0xFFE7F1FB
+      : key.equals("picnic") ? 0xFFE9F4ED : key.equals("gift") ? 0xFFFFF2D6 : 0xFFEFEAFD;
+    icon.setBackground(ui.bg(color, 14, false));
+    return icon;
+  }
+
+  private boolean wishWaiting(String id) {
+    JSONArray entries = array(data, "redemptions");
+    for (int i = 0; i < entries.length(); i++) {
+      JSONObject entry = obj(entries, i);
+      if (entry.optString("reward_id").equals(id) && entry.optString("status").equals("pending")) return true;
+    }
+    return false;
+  }
+
+  private TextView wishBadge(String label, String icon, boolean positive, boolean pending) {
+    TextView badge = ui.text(label, 11, false);
+    int color = positive ? 0xFF4A7A60 : pending ? 0xFF936820 : skin.muted;
+    badge.setTextColor(color);
+    badge.setBackground(ui.bg(positive ? 0xFFEDF6EF : pending ? 0xFFFFF3D9 : skin.soft, 7, false));
+    badge.setPadding(ui.dp(7), ui.dp(4), ui.dp(7), ui.dp(4));
+    badge.setCompoundDrawables(ui.icon(icon, 12, color), null, null, null);
+    badge.setCompoundDrawablePadding(ui.dp(4));
+    return badge;
+  }
+
+  private void shop(LinearLayout main) {
+    LinearLayout content = ui.col();
+    ui.grow(main, region(content, "shop"));
+    LinearLayout heading = ui.row();
+    heading.addView(new NavigationIconView(this, skin, "Heart"), ui.lp(21, 21));
+    ui.gap(heading, 8);
+    heading.addView(ui.text("心愿小铺", 21, true), new LinearLayout.LayoutParams(0, -2, 1));
+    LinearLayout history = ui.iconBox("Clock3", 20);
+    history.setContentDescription("兑换记录"); history.setFocusable(true);
+    history.setOnClickListener(v -> wishHistory());
+    heading.addView(history, ui.lp(44, 44));
+    if (parent()) {
+      ui.gap(heading, 8);
+      TextView add = ui.button("添加", "Plus", true, () -> rewardForm(null));
+      add.setContentDescription("添加心愿"); add.setTextSize(13);
+      heading.addView(add, ui.lp(-2, 44));
+    }
+    ui.add(content, heading, 48); ui.gap(content, 12);
+    int balance = data.optJSONObject("wallet").optInt("balance"), pending = 0, active = 0;
+    for (int i = 0; i < array(data, "redemptions").length(); i++) if (obj(array(data, "redemptions"), i).optString("status").equals("pending")) pending++;
+    for (int i = 0; i < array(data, "rewards").length(); i++) if (obj(array(data, "rewards"), i).optInt("active") == 1) active++;
+    boolean stackedOverview = widthDp() < 360 && getResources().getConfiguration().fontScale > 1.2f;
+    LinearLayout overview = ui.col(); ui.pad(overview, 14); overview.setBackground(ui.bg(skin.surface, 16, true));
+    LinearLayout balanceRow = ui.row(); ui.add(overview, balanceRow, -2);
+    LinearLayout star = ui.iconBox("Star", 23); star.setBackground(ui.bg(0xFFFFF3CE, 13, false));
+    balanceRow.addView(star, ui.lp(42, 42)); ui.gap(balanceRow, 10);
+    LinearLayout amount = ui.col(); ui.add(amount, ui.label("可用星星"), -2); ui.gap(amount, 4);
+    ui.add(amount, ui.text(balance + " 星", 24, true), -2);
+    balanceRow.addView(amount, new LinearLayout.LayoutParams(0, -2, 1));
+    if (!stackedOverview) ui.gap(balanceRow, 8);
+    LinearLayout awaiting = ui.col(); awaiting.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+    TextView line = ui.text(pending > 0 ? pending + " 个心愿待确认" : "期待下一份小心愿", 12, true);
+    line.setTextColor(skin.primary); line.setGravity(Gravity.RIGHT); ui.add(awaiting, line, -2); ui.gap(awaiting, 5);
+    TextView hint = ui.label("确认兑换后扣星 ›"); hint.setTextSize(11); hint.setGravity(Gravity.RIGHT); ui.add(awaiting, hint, -2);
+    awaiting.setContentDescription(parent() ? "审核兑换申请" : "查看兑换记录"); awaiting.setFocusable(true);
+    awaiting.setOnClickListener(v -> { if (parent()) navigate("review"); else wishHistory(); });
+    awaiting.setMinimumHeight(ui.dp(48)); awaiting.setTag("wish-pending");
+    if (stackedOverview) {
+      ui.gap(overview, 10); awaiting.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+      line.setGravity(Gravity.LEFT); hint.setGravity(Gravity.LEFT); ui.add(overview, awaiting, -2);
+    } else balanceRow.addView(awaiting, ui.lp(134, -2));
+    ui.add(content, overview, -2); ui.gap(content, 12);
+    if (parent()) {
+      LinearLayout filters = ui.row(); ui.pad(filters, 4); filters.setBackground(ui.bg(skin.soft, 13, false));
+      String[] keys = {"all", "active", "inactive"};
+      String[] labels = {"全部 " + array(data, "rewards").length(), "已上架 " + active, "已下架 " + (array(data, "rewards").length() - active)};
+      for (int i = 0; i < keys.length; i++) {
+        String key = keys[i];
+        TextView filter = ui.button(labels[i], null, false, () -> { rewardFilter = key; regionOffsets.remove("shop:" + childId + ":" + key); render(); });
+        filter.setTextSize(13); filter.setPadding(0, 0, 0, 0); filter.setSelected(rewardFilter.equals(key));
+        filter.setContentDescription(i == 0 ? "全部奖励" : i == 1 ? "已上架" : "已下架");
+        filter.setTextColor(rewardFilter.equals(key) ? skin.primary : skin.muted);
+        filter.setBackground(ui.bg(rewardFilter.equals(key) ? skin.surface : Color.TRANSPARENT, 10, false));
+        filters.addView(filter, new LinearLayout.LayoutParams(0, ui.dp(44), 1));
+      }
+      ui.add(content, filters, 52); ui.gap(content, 12);
+    } else { ui.add(content, ui.label("用攒下的星星，兑换喜欢的时光"), -2); ui.gap(content, 12); }
     JSONArray rewards = new JSONArray();
     for (int i = 0; i < array(data, "rewards").length(); i++) {
       JSONObject r = obj(array(data, "rewards"), i);
-      if (
-        !parent() ||
-        rewardFilter.equals("all") ||
-        (rewardFilter.equals("active") ? r.optInt("active") == 1 : r.optInt("active") == 0)
-      ) rewards.put(r);
+      if (parent() ? rewardFilter.equals("all") || (rewardFilter.equals("active") ? r.optInt("active") == 1 : r.optInt("active") == 0) : r.optInt("active") == 1) rewards.put(r);
     }
-    int cols = wide && widthDp() >= 1100 ? 3 : widthDp() >= 600 ? 2 : 1;
-    LinearLayout grid = ui.col();
-    ui.grow(main, region(grid, "shop"));
-    if (rewards.length() == 0) ui.add(
-      grid,
-      center(
-        parent() ? "当前状态下没有奖励，可以添加或切换筛选" : "心愿小铺准备中，家长可以添加奖励"
-      ),
-      180
-    );
+    int cols = Math.max(1, Math.min(3, (widthDp() - (wide ? 148 : 28)) / 300));
+    if (rewards.length() == 0) {
+      LinearLayout empty = ui.card(); empty.setGravity(Gravity.CENTER); ui.pad(empty, 24);
+      empty.addView(wishIcon("gift", 48), ui.lp(48, 48)); ui.gap(empty, 12);
+      ui.add(empty, center(parent() ? "这里还没有心愿" : "小心愿，准备中"), -2); ui.gap(empty, 8);
+      TextView emptyHint = ui.label(parent() ? "添加一个心愿，或切换上架状态查看" : "和家长一起，约定第一份奖励吧"); emptyHint.setGravity(Gravity.CENTER); ui.add(empty, emptyHint, -2);
+      ui.add(content, empty, -2);
+    }
     for (int start = 0; start < rewards.length(); start += cols) {
-      LinearLayout line = ui.row();
-      ui.add(
-        grid,
-        line,
-        Math.round(
-          (parent() ? 268 : 240) * Math.max(1, getResources().getConfiguration().fontScale)
-        )
-      );
+      LinearLayout row = ui.row(); row.setGravity(Gravity.TOP);
       for (int col = 0; col < cols; col++) {
         int index = start + col;
-        if (index >= rewards.length()) {
-          line.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 1));
-          if (col < cols - 1) ui.gap(line, 12);
-          continue;
-        }
-        JSONObject r = obj(rewards, index);
-        LinearLayout card = ui.card();
-        ui.pad(card, 12);
-        int artIndex = Arrays.asList("icecream", "toy", "movie", "picnic", "gift").indexOf(
-          r.optString("icon")
-        );
-        ui.add(
-          card,
-          new ArtView(this, "ui/rewards-atlas.png", 3, 2, artIndex < 0 ? 4 : artIndex),
-          88
-        );
-        ui.gap(card, 10);
-        TextView rewardTitle = ui.text(r.optString("title"), 17, true);
-        ui.ellipsis(rewardTitle, 1);
-        ui.add(card, rewardTitle, -2);
-        ui.gap(card, 6);
-        if (parent()) {
-          ui.add(card, ui.label(r.optInt("active") == 1 ? "已上架" : "已下架"), -2);
-          ui.gap(card, 5);
-        }
-        TextView desc = ui.label(r.optString("description"));
-        ui.ellipsis(desc, 2);
-        ui.grow(card, desc);
-        LinearLayout price = ui.row();
-        price.addView(new StarView(this, skin), ui.lp(30, 36));
-        ui.gap(price, 6);
-        price.addView(ui.text("" + r.optInt("cost"), 23, true));
-        ui.gap(card, 8);
-        TextView b = ui.button(parent() ? "编辑心愿" : "我想兑换", !parent(), () -> {
-          if (parent()) rewardForm(r);
-          else {
-            LinearLayout f = form();
-            ui.line(
-              f,
-              "想用 " +
-                r.optInt("cost") +
-                " 颗星星兑换「" +
-                r.optString("title") +
-                "」吗？家长确认后才会扣星。"
-            );
-            dialog("许下小心愿", f, "提交兑换申请", () ->
-              mutation(
-                childPath() + "/redemptions",
-                "POST",
-                json("reward_id", r.optString("id")),
-                true,
-                "心愿已送达，等待家长确认"
-              )
-            );
-          }
-        });
-        if (!parent() && data.optJSONObject("wallet").optInt("balance") < r.optInt("cost")) {
-          b.setText(
-            "还差 " + (r.optInt("cost") - data.optJSONObject("wallet").optInt("balance")) + " 星"
-          );
-          b.setEnabled(false);
-          b.setAlpha(.55f);
-        }
-        if (parent()) {
-          ui.add(card, price, 36);
-          ui.gap(card, 6);
-          LinearLayout actions = ui.row();
-          actions.addView(b, new LinearLayout.LayoutParams(0, ui.dp(48), 1));
-          ui.gap(actions, 8);
-          actions.addView(
-            ui.button(r.optInt("active") == 1 ? "下架" : "重新上架", false, () ->
-              mutation(
-                "/api/rewards/" + r.optString("id"),
-                "PATCH",
-                json(
-                  "title",
-                  r.optString("title"),
-                  "description",
-                  r.optString("description"),
-                  "icon",
-                  r.optString("icon"),
-                  "cost",
-                  r.optInt("cost"),
-                  "active",
-                  r.optInt("active") != 1
-                ),
-                false,
-                r.optInt("active") == 1 ? "奖励已下架" : "奖励已上架"
-              )
-            ),
-            new LinearLayout.LayoutParams(0, ui.dp(48), 1)
-          );
-          ui.add(card, actions, 48);
-        } else {
-          LinearLayout action = ui.row();
-          action.addView(price, new LinearLayout.LayoutParams(0, -2, 1));
-          action.addView(b);
-          ui.add(card, action, 48);
-        }
-        line.addView(card, new LinearLayout.LayoutParams(0, -1, 1));
-        if (col < cols - 1) ui.gap(line, 12);
+        row.addView(index < rewards.length() ? wishCard(obj(rewards, index), balance) : new View(this), new LinearLayout.LayoutParams(0, -2, 1));
+        if (col < cols - 1) ui.gap(row, 12);
       }
-      if (start + cols < rewards.length()) ui.gap(grid, 12);
+      ui.add(content, row, -2); ui.gap(content, 12);
     }
+    TextView footnote = ui.label(parent() ? "心愿由家人共享，兑换记录按孩子分别保存。" : "申请时不会扣星，家长确认后才会扣除。"); footnote.setTextSize(11); ui.add(content, footnote, -2);
+  }
+
+  private LinearLayout wishCard(JSONObject r, int balance) {
+    LinearLayout card = ui.col(); ui.pad(card, 14); card.setTag("wish-card"); card.setBackground(ui.bg(skin.surface, 16, true));
+    LinearLayout heading = ui.row(); heading.setGravity(Gravity.TOP);
+    heading.addView(wishIcon(r.optString("icon"), 48), ui.lp(48, 48)); ui.gap(heading, 12);
+    LinearLayout copy = ui.col();
+    TextView name = ui.text(r.optString("title"), 17, true); ui.ellipsis(name, 2); ui.add(copy, name, -2);
+    if (!r.optString("description").isEmpty()) {
+      ui.gap(copy, 4); TextView desc = ui.label(r.optString("description")); desc.setTextSize(12); ui.ellipsis(desc, 2); ui.add(copy, desc, -2);
+    }
+    heading.addView(copy, new LinearLayout.LayoutParams(0, -2, 1)); ui.add(card, heading, -2); ui.gap(card, 10);
+    boolean waiting = wishWaiting(r.optString("id")), active = r.optInt("active") == 1;
+    int missing = Math.max(0, r.optInt("cost") - balance);
+    LinearLayout state = ui.row();
+    state.addView(wishBadge(parent() ? active ? "已上架" : "已下架" : waiting ? "等待确认" : missing > 0 ? "攒星中" : "可以兑换",
+      parent() ? active ? "Check" : "Power" : waiting ? "Clock3" : missing > 0 ? "Star" : "Check", parent() ? active : !waiting && missing == 0, !parent() && (waiting || missing > 0)));
+    if (parent() && waiting || !parent() && !waiting) {
+      ui.gap(state, 8); TextView note = ui.label(parent() ? "有待确认申请" : missing > 0 ? "已攒 " + Math.max(0, balance) + " / " + r.optInt("cost") + " 星" : "已经攒够啦"); note.setTextSize(10);
+      state.addView(note, new LinearLayout.LayoutParams(0, -2, 1));
+    }
+    ui.add(card, state, -2); ui.gap(card, 10);
+    TextView price = ui.text(r.optInt("cost") + " 星", 21, true);
+    price.setCompoundDrawables(ui.icon("Star", 18, 0xFFBB8B2D), null, null, null); price.setCompoundDrawablePadding(ui.dp(4));
+    LinearLayout actions = ui.row();
+    if (parent()) {
+      TextView edit = ui.button("编辑", "Pencil", false, () -> rewardForm(r)); edit.setContentDescription("编辑心愿 " + r.optString("title")); edit.setBackground(ui.bg(skin.soft, 12, false));
+      TextView toggle = ui.button(active ? "下架" : "上架", "Power", false, () -> mutation("/api/rewards/" + r.optString("id"), "PATCH",
+        json("title", r.optString("title"), "description", r.optString("description"), "icon", r.optString("icon"), "cost", r.optInt("cost"), "active", !active), false, active ? "奖励已下架" : "奖励已上架"));
+      toggle.setContentDescription((active ? "下架心愿 " : "上架心愿 ") + r.optString("title"));
+      for (TextView button : new TextView[] {edit, toggle}) { button.setTextSize(12); button.setPadding(ui.dp(9), 0, ui.dp(9), 0); button.setEnabled(!busy); button.setTag("wish-action"); }
+      actions.addView(edit, ui.lp(-2, 44)); ui.gap(actions, 7); actions.addView(toggle, ui.lp(-2, 44));
+    } else {
+      TextView redeem = ui.button(waiting ? "等待确认" : missing > 0 ? "还差 " + missing + " 星" : "我想兑换", waiting ? "Clock3" : "Gift", !waiting && missing == 0, () -> redeemWish(r));
+      redeem.setTextSize(12); redeem.setTag("wish-action"); redeem.setPadding(ui.dp(10), 0, ui.dp(10), 0); redeem.setEnabled(!busy && !waiting && missing == 0);
+      if (waiting || missing > 0) { redeem.setTextColor(skin.muted); redeem.setBackground(ui.bg(skin.soft, 12, false)); }
+      actions.addView(redeem, ui.lp(-2, 44));
+    }
+    if (getResources().getConfiguration().fontScale > 1.2f) {
+      ui.add(card, price, -2); ui.gap(card, 8); actions.setGravity(Gravity.RIGHT); ui.add(card, actions, -2);
+    } else {
+      LinearLayout bottom = ui.row(); bottom.addView(price, new LinearLayout.LayoutParams(0, -2, 1)); ui.gap(bottom, 6); bottom.addView(actions, ui.lp(-2, -2)); ui.add(card, bottom, -2);
+    }
+    if (!parent()) {
+      ui.gap(card, 10); ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+      progress.setMax(r.optInt("cost")); progress.setProgress(Math.max(0, Math.min(balance, r.optInt("cost"))));
+      progress.setProgressTintList(android.content.res.ColorStateList.valueOf(waiting ? 0xFFD4B570 : skin.primary));
+      progress.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(skin.soft)); progress.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+      ui.add(card, progress, 4);
+    }
+    return card;
+  }
+
+  private String wishTime(String value) {
+    try {
+      java.text.SimpleDateFormat input = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX", Locale.US);
+      java.text.SimpleDateFormat output = new java.text.SimpleDateFormat("M月d日 HH:mm", Locale.CHINA); output.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
+      return output.format(input.parse(value));
+    } catch (Exception ignored) { return value.length() >= 10 ? value.substring(0, 10) : value; }
+  }
+
+  private void wishHistory() {
+    LinearLayout f = form(); JSONArray entries = array(data, "redemptions");
+    if (entries.length() == 0) {
+      LinearLayout empty = ui.col(); empty.setGravity(Gravity.CENTER); ui.pad(empty, 20);
+      empty.addView(wishIcon("gift", 48), ui.lp(48, 48)); ui.gap(empty, 14);
+      ui.add(empty, center("还没有兑换记录"), -2); ui.gap(empty, 8);
+      TextView hint = ui.label("攒下小星星，期待第一个心愿实现"); hint.setGravity(Gravity.CENTER); ui.add(empty, hint, -2); ui.add(f, empty, -2);
+    }
+    for (int i = 0; i < entries.length(); i++) {
+      JSONObject r = obj(entries, i); LinearLayout row = ui.row(); row.setGravity(Gravity.TOP);
+      row.addView(wishIcon(r.optString("icon"), 42), ui.lp(42, 42)); ui.gap(row, 12);
+      LinearLayout text = ui.col(); ui.add(text, ui.text(r.optString("title"), 16, true), -2); ui.gap(text, 6);
+      TextView meta = ui.label(r.optInt("cost") + " 星 · " + wishTime(r.optString("created_at"))); meta.setTextSize(12); ui.add(text, meta, -2); ui.gap(text, 8);
+      String status = r.optString("status");
+      text.addView(wishBadge(status.equals("pending") ? "等待确认" : status.equals("approved") ? "兑换成功" : "已退回", status.equals("pending") ? "Clock3" : status.equals("approved") ? "Check" : "X", status.equals("approved"), status.equals("pending")));
+      if (!r.optString("review_note").isEmpty()) { ui.gap(text, 8); ui.add(text, ui.label(r.optString("review_note")), -2); }
+      row.addView(text, new LinearLayout.LayoutParams(0, -2, 1)); ui.add(f, row, -2); ui.gap(f, 18);
+    }
+    dialog("兑换记录", f, null, null);
+  }
+
+  private void redeemWish(JSONObject r) {
+    LinearLayout f = form(), heading = ui.row(); heading.setGravity(Gravity.TOP);
+    heading.addView(wishIcon(r.optString("icon"), 48), ui.lp(48, 48)); ui.gap(heading, 12);
+    LinearLayout copy = ui.col(); ui.add(copy, ui.text(r.optString("title"), 19, true), -2); ui.gap(copy, 6);
+    ui.add(copy, ui.label(r.optString("description").isEmpty() ? "一份值得期待的小心愿" : r.optString("description")), -2);
+    heading.addView(copy, new LinearLayout.LayoutParams(0, -2, 1)); ui.add(f, heading, -2); ui.gap(f, 20);
+    LinearLayout receipt = ui.row(); ui.pad(receipt, 16); receipt.setBackground(ui.bg(skin.soft, 14, false));
+    String[][] values = {{"兑换所需", r.optInt("cost") + " 星"}, {"兑换后剩余", (data.optJSONObject("wallet").optInt("balance") - r.optInt("cost")) + " 星"}};
+    for (String[] value : values) {
+      LinearLayout item = ui.col(); ui.add(item, ui.label(value[0]), -2); ui.gap(item, 6); ui.add(item, ui.text(value[1], 24, true), -2); receipt.addView(item, new LinearLayout.LayoutParams(0, -2, 1));
+    }
+    ui.add(f, receipt, -2); ui.gap(f, 14);
+    TextView hint = ui.label("家长确认后才会扣星，提交申请时不扣除。"); hint.setTextSize(12); ui.add(f, hint, -2);
+    dialog("兑换一个小心愿", f, "请家长帮我兑换", () -> mutation(childPath() + "/redemptions", "POST", json("reward_id", r.optString("id")), true, "心愿已送达，等待家长确认"));
   }
 
   private void rewardForm(JSONObject r) {
     LinearLayout f = form();
-    EditText title = ui.input(f, "心愿名称", r == null ? "" : r.optString("title"), 1),
-      desc = ui.input(
-        f,
-        "说明",
-        r == null ? "" : r.optString("description"),
-        InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-      ),
-      cost = ui.input(f, "需要星星", r == null ? "5" : r.optString("cost"), 2);
-    String[] icons = { "icecream", "toy", "movie", "picnic", "gift" };
-    Spinner icon = ui.select(
-      f,
-      "图标",
-      new String[] { "冰淇淋", "玩具", "电影", "野餐", "礼物" },
-      r == null ? 4 : Math.max(0, Arrays.asList(icons).indexOf(r.optString("icon")))
-    );
-    CheckBox active = new CheckBox(this);
-    active.setText("上架这个心愿");
-    active.setChecked(r == null || r.optInt("active") == 1);
-    f.addView(active);
-    dialog(r == null ? "添加心愿" : "编辑心愿", f, "保存", () -> {
-      int n = number(cost, 1, 100000);
-      if (n < 0 || title.length() == 0) return;
-      mutation(
-        r == null ? childPath() + "/rewards" : "/api/rewards/" + r.optString("id"),
-        r == null ? "POST" : "PATCH",
-        json(
-          "title",
-          title.getText().toString(),
-          "description",
-          desc.getText().toString(),
-          "cost",
-          n,
-          "icon",
-          icons[icon.getSelectedItemPosition()],
-          "active",
-          active.isChecked()
-        ),
-        false,
-        "心愿已保存"
-      );
+    EditText title = ui.input(f, "心愿名称", r == null ? "" : r.optString("title"), 1);
+    title.setHint("例如：周末一起去野餐"); title.setFilters(new android.text.InputFilter[] {new android.text.InputFilter.LengthFilter(100)});
+    EditText desc = ui.input(f, "心愿说明", r == null ? "" : r.optString("description"), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+    desc.setHint("约定好内容，让小期待更具体"); desc.setMinLines(2); desc.setMaxLines(4); desc.setFilters(new android.text.InputFilter[] {new android.text.InputFilter.LengthFilter(1000)});
+    EditText cost = ui.input(f, "兑换所需星星", r == null ? "5" : r.optString("cost"), InputType.TYPE_CLASS_NUMBER);
+    ui.add(f, ui.label("选择心愿图标"), -2); ui.gap(f, 8);
+    String[] icons = {"icecream", "toy", "movie", "picnic", "gift"}, labels = {"冰淇淋", "玩具", "电影", "野餐", "礼物"};
+    RadioGroup picker = new RadioGroup(this); picker.setOrientation(RadioGroup.HORIZONTAL);
+    for (int i = 0; i < icons.length; i++) {
+      RadioButton option = new RadioButton(this); option.setId(View.generateViewId()); option.setTag(icons[i]); option.setText(labels[i]); option.setTextSize(11);
+      option.setTypeface(IslandTypeface.get(this, false)); option.setGravity(Gravity.CENTER); option.setButtonDrawable((android.graphics.drawable.Drawable) null);
+      option.setPadding(ui.dp(2), ui.dp(8), ui.dp(2), ui.dp(8)); option.setCompoundDrawables(null, ui.icon(wishIconName(icons[i]), 24, skin.primary), null, null); option.setCompoundDrawablePadding(ui.dp(8));
+      option.setMinHeight(ui.dp(72));
+      RadioGroup.LayoutParams params = new RadioGroup.LayoutParams(0, -1, 1); if (i > 0) params.leftMargin = ui.dp(4); picker.addView(option, params);
+    }
+    picker.setOnCheckedChangeListener((group, checked) -> {
+      for (int i = 0; i < group.getChildCount(); i++) {
+        RadioButton option = (RadioButton) group.getChildAt(i); boolean selected = option.getId() == checked;
+        android.graphics.drawable.GradientDrawable background = ui.bg(selected ? skin.soft : skin.surface, 12, true);
+        if (selected) background.setStroke(ui.dp(2), skin.primary); option.setBackground(background); option.setTextColor(selected ? skin.primary : skin.muted);
+      }
+    });
+    int chosen = r == null ? 4 : Arrays.asList(icons).indexOf(r.optString("icon")); picker.check(picker.getChildAt(chosen < 0 ? 4 : chosen).getId());
+    ui.add(f, picker, -2); ui.gap(f, 14);
+    CheckBox active = new CheckBox(this); active.setText("在心愿小铺上架"); active.setTextSize(14); active.setTypeface(IslandTypeface.get(this, false)); active.setTextColor(skin.ink);
+    active.setButtonTintList(android.content.res.ColorStateList.valueOf(skin.primary)); active.setBackground(ui.bg(skin.soft, 12, false)); active.setPadding(ui.dp(8), ui.dp(8), ui.dp(8), ui.dp(8));
+    active.setChecked(r == null || r.optInt("active") == 1); ui.add(f, active, -2);
+    dialog(r == null ? "添加心愿" : "编辑心愿", f, "保存心愿", () -> {
+      int n = number(cost, 1, 100000); if (n < 0 || title.length() == 0) return;
+      RadioButton selected = picker.findViewById(picker.getCheckedRadioButtonId());
+      mutation(r == null ? childPath() + "/rewards" : "/api/rewards/" + r.optString("id"), r == null ? "POST" : "PATCH",
+        json("title", title.getText().toString(), "description", desc.getText().toString(), "cost", n, "icon", selected.getTag().toString(), "active", active.isChecked()), false, "心愿已保存");
     });
   }
 

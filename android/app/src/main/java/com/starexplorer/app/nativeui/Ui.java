@@ -63,20 +63,29 @@ public final class Ui {
   }
 
   public TextView button(String title, boolean primary, Runnable action) {
+    return button(title, actionIcon(title), primary, action);
+  }
+
+  public Drawable icon(String name, int size, int color) {
+    try (java.io.InputStream in = c.getAssets().open("ui/v2/" + name + ".png")) {
+      Drawable d = Drawable.createFromStream(in, name);
+      d.setBounds(0, 0, dp(size), dp(size));
+      d.setTint(color);
+      return d;
+    } catch (java.io.IOException ignored) { return null; }
+  }
+
+  public TextView button(String title, String iconName, boolean primary, Runnable action) {
     TextView b = text(title, 15, true);
     b.setGravity(Gravity.CENTER);
     b.setMinHeight(dp(48));
     b.setPadding(dp(14), dp(8), dp(14), dp(8));
     b.setTextColor(primary ? android.graphics.Color.WHITE : s.ink);
     b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x226C5CFF), bg(primary ? s.primary : s.surface, 12, !primary), null));
-    String icon = actionIcon(title);
-    if (icon != null) try (java.io.InputStream in = c.getAssets().open("ui/v2/" + icon + ".png")) {
-      Drawable d = Drawable.createFromStream(in, icon);
-      d.setBounds(0, 0, dp(18), dp(18));
-      d.setTint(primary ? android.graphics.Color.WHITE : s.primary);
-      b.setCompoundDrawables(d, null, null, null);
+    if (iconName != null) {
+      b.setCompoundDrawables(icon(iconName, 18, primary ? android.graphics.Color.WHITE : s.primary), null, null, null);
       b.setCompoundDrawablePadding(dp(7));
-    } catch (java.io.IOException ignored) {}
+    }
     b.setClickable(true);
     b.setFocusable(true);
     b.setOnClickListener(v -> {

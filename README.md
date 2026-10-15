@@ -56,7 +56,7 @@ npm run android:build
 npm run android:install   # 设备解锁并允许 USB 安装
 ```
 
-产物为 `artifacts/star-explorer-native.apk`（0.3.1-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
+产物为 `artifacts/star-explorer-native.apk`（0.3.2-native，调试签名），默认访问 `https://star.zoomzhao.com`，不依赖 USB 转发。Android 已移除 BridgeActivity 和 WebView，界面、表单、图片绘制、触感、星星动画、文件选择和网络请求均为原生实现。不要再运行 Capacitor sync。
 
 发布前在 Android Studio 配置自己的 release 签名，再执行 `./android/gradlew -p android :app:assembleRelease`。API 地址在 `android/app/build.gradle` 的 `API_BASE_URL` 中配置，正式构建仅支持 HTTPS。调试构建可通过 `test_api` Intent 参数指定本机回环地址，供隔离测试使用；release 忽略该参数。
 
@@ -159,6 +159,8 @@ npm run build       # TypeScript + Web 生产构建
 
 ## 全新界面（0.3.0）
 
-按 ImageGen 新稿重做孩子、家长和管理端：浅紫与靛蓝配色、紧凑任务行、手机底部导航、平板侧栏及待确认预览。首页专注任务；碰卡发星、规则、制卡、检测和账号设置集中在更多。任务名称放大，完成次数以内联 0/1 显示。到账页优先显示本次积分、继续碰卡和修改积分。管理端统一账号、密码、搜索、备份操作图标；Android 离线打包 39 个 Lucide 图标。设计稿及生成提示词见 `design/imagegen/`。
+按 ImageGen 新稿重做孩子、家长和管理端：浅紫与靛蓝配色、紧凑任务行、手机底部导航、平板侧栏及待确认预览。首页专注任务；碰卡发星、规则、制卡、检测和账号设置集中在更多。任务名称放大，完成次数以内联 0/1 显示。到账页优先显示本次积分、继续碰卡和修改积分。管理端统一账号、密码、搜索、备份操作图标；Android 离线打包 44 个 Lucide 图标。设计稿及生成提示词见 `design/imagegen/`。
 
 验证使用独立内存数据库和 `com.starexplorer.app.testbed`：11 项 NFC 流程、手机/平板/竖屏平板/大字体下的角色与图标检查；自定义每日上限 10 次及规则、任务快照和账本在只读导航前后保持一致。发布前后另对生产完整备份按记录 ID 和全部字段核对。
+
+心愿页沿用当前主题，使用紧凑卡片与手机 / 平板自适应网格。家长可筛选上架状态、编辑和上下架；孩子可查看攒星进度与待确认状态。图标选择、兑换确认与记录弹窗使用统一样式，待确认申请不会重复提交，历史兑换价格保留申请时的快照。

@@ -74,7 +74,7 @@ public class IslandLayoutTest {
     click("更多");waitText("任务管理");capture("more");
     click("任务规则");waitText("科目与任务规则");capture("rules");
     click("星星口袋");waitText("星星收支记录");capture("wallet");
-    click("心愿");waitText("奖励小铺管理");capture("shop");
+    click("心愿");waitText("心愿小铺");capture("shop");
     JSONObject after=(JSONObject)client.get(path+"/dashboard");
     for(String key:new String[]{"rules","tasks","ledger","wallet","reviews","rewards"}) assertEquals("UI navigation preserves " + key,before.get(key).toString(),after.get(key).toString());
   }
@@ -85,7 +85,7 @@ public class IslandLayoutTest {
     for(String file:context.getAssets().list("ui/v2")) {
       try(InputStream in=context.getAssets().open("ui/v2/"+file)) { assertNotNull("Icon " + file,BitmapFactory.decodeStream(in)); }
     }
-    assertEquals(39,context.getAssets().list("ui/v2").length);
+    assertEquals(44,context.getAssets().list("ui/v2").length);
     for(String role:new String[]{"child","admin"}) {
       client=new StarApi(context,"http://127.0.0.1:3004");
       JSONObject login=(JSONObject)client.call("/api/login","POST",json("username",role,"password",role.equals("admin")?"native-test-admin":"child123"),false);

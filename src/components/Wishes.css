@@ -1,0 +1,561 @@
+/* Wish screens share the current mobile navigation, fonts and theme tokens. */
+.wish-heading,
+.wish-heading-actions,
+.wish-card-heading,
+.reward-bottom,
+.wish-card-actions,
+.wish-card-status,
+.wish-balance,
+.wish-overview {
+  display: flex;
+  align-items: center;
+}
+.wish-heading {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.wish-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  margin: 0;
+}
+.wish-heading h2 > svg {
+  width: 21px;
+  color: var(--primary);
+}
+.wish-heading-actions {
+  gap: 8px;
+}
+.wish-heading-actions button {
+  height: 44px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.wish-heading-actions .wish-history-button {
+  width: 44px;
+  padding: 0;
+}
+.wish-overview {
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+}
+.wish-balance {
+  gap: 10px;
+  flex-shrink: 0;
+}
+.wish-balance-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  color: #b7852d;
+  background: #fff3ce;
+}
+.wish-balance-icon svg {
+  width: 23px;
+}
+.wish-balance > div > span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.wish-balance strong {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  line-height: 1.2;
+  font-size: 26px;
+}
+.wish-balance small {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.wish-pending-link {
+  min-width: 0;
+  height: auto;
+  min-height: 48px;
+  padding: 5px 0 5px 8px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  font-size: 12px;
+  text-align: right;
+  gap: 4px;
+}
+.wish-pending-link > span {
+  display: block;
+  min-width: 0;
+}
+.wish-pending-link b {
+  color: var(--primary);
+}
+.wish-pending-link small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-top: 4px;
+}
+.wish-pending-link > svg {
+  flex-shrink: 0;
+}
+.wish-filters {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0;
+  padding: 4px;
+  border-radius: 13px;
+  background: var(--mint-soft);
+}
+.wish-filters button {
+  flex: 1;
+  min-width: 0;
+  padding: 0 6px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  color: var(--muted);
+  gap: 5px;
+}
+.wish-filters button[aria-pressed='true'] {
+  color: var(--primary);
+  background: var(--card);
+}
+.wish-filters button span {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.wish-section-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 15px 0 12px;
+}
+.shop-page .rewards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 12px;
+}
+.shop-page .reward-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  min-width: 0;
+}
+.wish-card-heading {
+  align-items: flex-start;
+  gap: 12px;
+}
+.wish-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: #7960b6;
+  background: #efeafd;
+}
+.wish-icon > svg {
+  width: 25px;
+  height: 25px;
+}
+.wish-icon-icecream {
+  color: #ae6885;
+  background: #faeaf2;
+}
+.wish-icon-toy {
+  color: #547fa8;
+  background: #e7f1fb;
+}
+.wish-icon-movie {
+  color: #7960b6;
+  background: #efeafd;
+}
+.wish-icon-picnic {
+  color: #56836b;
+  background: #e9f4ed;
+}
+.wish-icon-gift {
+  color: #af8138;
+  background: #fff2d6;
+}
+.wish-card-copy {
+  min-width: 0;
+  flex: 1;
+}
+.reward-card .wish-card-copy h3 {
+  font-size: 17px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.wish-card-copy p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.wish-card-status {
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+.wish-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: #efedf6;
+  color: #77758d;
+  font-size: 10px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+.wish-badge svg {
+  width: 12px;
+  height: 12px;
+}
+.wish-badge.available,
+.wish-badge.approved {
+  background: #edf6ef;
+  color: #4a7a60;
+}
+.wish-badge.pending,
+.wish-badge.saving {
+  background: #fff3d9;
+  color: #936820;
+}
+.wish-badge.rejected {
+  background: #faedf0;
+  color: #a86372;
+}
+.wish-waiting,
+.wish-progress-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.reward-bottom {
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+}
+.reward-bottom .wish-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 22px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.wish-price > svg {
+  color: #bb8b2d;
+}
+.wish-price small {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.wish-card-actions {
+  gap: 7px;
+}
+.wish-card-actions button {
+  min-height: 44px;
+  height: 44px;
+  padding: 0 10px;
+  font-size: 12px;
+  gap: 5px;
+  white-space: nowrap;
+}
+.wish-card-actions .wish-edit {
+  color: var(--primary);
+  border-color: transparent;
+  background: var(--mint-soft);
+}
+.wish-card-actions .wish-toggle {
+  color: var(--muted);
+}
+.wish-card-actions button:disabled {
+  opacity: 1;
+  background: #f0eef5;
+  color: #858295;
+  border-color: transparent;
+  box-shadow: none;
+}
+.wish-progress {
+  height: 4px;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--mint-soft);
+}
+.wish-progress > span {
+  height: 100%;
+  background: var(--primary);
+  display: block;
+  border-radius: inherit;
+}
+.wish-progress.pending > span {
+  background: #d4b570;
+}
+.reward-inactive .wish-icon {
+  filter: saturate(0.35);
+}
+.wish-footnote {
+  margin: 14px 0 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.wish-empty {
+  text-align: center;
+  padding: 28px 16px;
+}
+.wish-empty > svg {
+  color: var(--primary);
+  width: 36px;
+  height: 36px;
+  margin-bottom: 10px;
+}
+.wish-empty h3 {
+  font-size: 17px;
+  margin: 0 0 6px;
+}
+.wish-empty p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0 0 15px;
+}
+.wish-empty button {
+  margin: auto;
+}
+.wish-history-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.wish-history-row:first-child {
+  padding-top: 4px;
+}
+.wish-history-row:last-child {
+  border-bottom: 0;
+}
+.wish-history-row > div {
+  min-width: 0;
+  flex: 1;
+}
+.wish-history-row h3 {
+  font-size: 16px;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.wish-history-row p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 4px 0 8px;
+  overflow-wrap: anywhere;
+}
+.wish-history-row .wish-review-note {
+  margin-bottom: 0;
+  color: var(--ink);
+}
+.wish-icon-picker {
+  border: 0;
+  margin: 0 0 16px;
+  padding: 0;
+  min-width: 0;
+}
+.wish-icon-picker legend {
+  font-size: 13px;
+  margin-bottom: 9px;
+}
+.wish-icon-picker > div {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+.wish-icon-picker label {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 2px;
+  border-radius: 12px;
+  border: 2px solid transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.wish-icon-picker label.chosen {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--mint-soft);
+}
+.wish-icon-picker label:has(input:focus-visible) {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
+.wish-icon-picker input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.wish-icon-picker .wish-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+.wish-icon-picker .wish-icon > svg {
+  width: 21px;
+  height: 21px;
+}
+.wish-form textarea {
+  min-height: 70px;
+}
+.wish-active-field {
+  padding: 12px;
+  background: var(--mint-soft);
+  border-radius: 12px;
+  align-items: center;
+}
+.wish-active-field span {
+  font-size: 13px;
+}
+.wish-active-field small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.wish-redeem {
+  padding: 0;
+  text-align: left;
+}
+.wish-redeem-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+.wish-redeem-heading > div {
+  min-width: 0;
+}
+.wish-redeem-heading h3 {
+  font-size: 19px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.wish-redeem-heading p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+.wish-receipt {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--mint-soft);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 20px;
+  gap: 16px;
+}
+.wish-receipt > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.wish-receipt strong {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+  font-size: 25px;
+  margin-top: 6px;
+}
+.wish-receipt small {
+  font-size: 12px;
+  font-weight: 500;
+}
+.wish-redeem .wish-redeem-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 14px 0 20px;
+}
+.wish-redeem-note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+@media (min-width: 900px) {
+  .shop-page .rewards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wish-overview {
+    padding: 18px;
+  }
+  .wish-heading h2 {
+    font-size: 24px;
+  }
+  .wish-filters {
+    max-width: 420px;
+  }
+  .wish-card-copy p {
+    min-height: 38px;
+  }
+}
+@media (min-width: 1200px) {
+  .shop-page .rewards-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 360px) {
+  .wish-overview {
+    padding: 12px;
+    gap: 5px;
+  }
+  .wish-balance {
+    gap: 7px;
+  }
+  .wish-pending-link {
+    font-size: 11px;
+    padding-left: 0;
+  }
+  .wish-pending-link small {
+    font-size: 10px;
+  }
+  .wish-balance-icon {
+    width: 36px;
+    height: 36px;
+  }
+  .wish-card-actions button {
+    padding: 0 8px;
+  }
+}

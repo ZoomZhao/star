@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useId, cloneElement } from 'r
 import type { FormEvent, ReactNode, ReactElement } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Button, InteractionSurface, Modal, SubjectPicker, Toast } from './components/Fluid';
+import { WishShop, WishHistory, WishIcon, wishIcons } from './components/Wishes';
 import {
   Star,
   ClipboardList,
@@ -340,6 +341,7 @@ type Dialog =
   | { type: 'rule'; rule?: Rule; task?: Task }
   | { type: 'reward'; reward?: Reward }
   | { type: 'redeem'; reward: Reward }
+  | { type: 'wish-history' }
   | { type: 'entry' }
   | { type: 'reverse'; entry: Entry }
   | { type: 'settings' }
@@ -1151,171 +1153,32 @@ export default function App() {
               </section>
             )}
             {page === 'shop' && (
-              <section className="shop-page">
-                <PageHeading
-                  eyebrow="A LITTLE WISH, A HAPPY REWARD"
-                  title={isParent ? '奖励小铺管理' : '奖励小铺'}
-                  icon={<Store />}
-                  action={
-                    isParent ? (
-                      <Button className="primary" onClick={() => setDialog({ type: 'reward' })}>
-                        <Plus size={17} /> 添加奖励
-                      </Button>
-                    ) : undefined
-                  }
-                />
-                {isParent && (
-                  <div className="reward-management">
-                    <label>
-                      奖励状态{' '}
-                      <select
-                        aria-label="奖励状态"
-                        value={rewardFilter}
-                        onChange={(e) => setRewardFilter(e.target.value)}
-                      >
-                        <option value="all">全部奖励</option>
-                        <option value="active">已上架</option>
-                        <option value="inactive">已下架</option>
-                      </select>
-                    </label>
-                    <p>奖励由本家庭共用，下架后可重新上架。</p>
-                    <Button className="secondary" onClick={() => setPage('review')}>
-                      审核兑换申请
-                    </Button>
-                  </div>
-                )}
-                <div className="shop-banner">
-                  <div>
-                    <span className="eyebrow">把努力，变成喜欢的事物</span>
-                    <h3>
-                      存下小星星，
-                      <br />
-                      实现小心愿。
-                    </h3>
-                    <p>
-                      <StarIcon size={17} /> 你的口袋里有 <b>{data.wallet.balance}</b> 颗星星
-                    </p>
-                  </div>
-                  <div className="shop-gift">
-                    🎁<span>✦</span>
-                  </div>
-                </div>
-                <div className="rewards-grid">
-                  {data.rewards
-                    .filter(
-                      (r) =>
-                        !isParent ||
-                        rewardFilter === 'all' ||
-                        (rewardFilter === 'active' ? !!r.active : !r.active),
-                    )
-                    .map((r) => {
-                      const waiting = data.redemptions.some(
-                        (x) => x.reward_id === r.id && x.status === 'pending',
-                      );
-                      return (
-                        <article className="reward-card" key={r.id}>
-                          <Tile icon={r.icon} size="large" />
-                          <h3>{r.title}</h3>
-                          {isParent && (
-                            <span className={`tag ${r.active ? 'approved' : 'rejected'}`}>
-                              {r.active ? '已上架' : '已下架'}
-                            </span>
-                          )}
-                          <p>{r.description}</p>
-                          <div className="reward-bottom">
-                            <strong>
-                              <StarIcon size={20} />
-                              {r.cost}
-                            </strong>
-                            <Button
-                              className="secondary"
-                              disabled={
-                                busy ||
-                                (!isParent && waiting) ||
-                                !online ||
-                                (!isParent && r.cost > data.wallet.balance)
-                              }
-                              onClick={() =>
-                                setDialog(
-                                  isParent
-                                    ? { type: 'reward', reward: r }
-                                    : { type: 'redeem', reward: r },
-                                )
-                              }
-                            >
-                              {isParent
-                                ? '编辑奖励'
-                                : waiting
-                                  ? '等待确认'
-                                  : r.cost > data.wallet.balance
-                                    ? `还差 ${r.cost - data.wallet.balance} 星`
-                                    : '我想兑换'}
-                            </Button>
-                          </div>
-                          {isParent && (
-                            <Button
-                              className="secondary reward-status-action"
-                              disabled={busy || !online}
-                              onClick={() =>
-                                act(
-                                  () =>
-                                    api(`/api/rewards/${r.id}`, 'PATCH', {
-                                      title: r.title,
-                                      description: r.description,
-                                      icon: r.icon,
-                                      cost: r.cost,
-                                      active: !r.active,
-                                    }),
-                                  r.active ? '奖励已下架' : '奖励已上架',
-                                )
-                              }
-                            >
-                              {r.active ? '下架奖励' : '重新上架'}
-                            </Button>
-                          )}
-                        </article>
-                      );
-                    })}
-                </div>
-                {!data.rewards.filter(
-                  (r) =>
-                    !isParent ||
-                    rewardFilter === 'all' ||
-                    (rewardFilter === 'active' ? !!r.active : !r.active),
-                ).length && (
-                  <Empty>
-                    {isParent
-                      ? '当前筛选下没有奖励，可以添加奖励或切换状态查看。'
-                      : '小铺还在准备中，家长可以添加第一个奖励。'}
-                  </Empty>
-                )}
-                <div className="card redemption-list">
-                  <h3>我的兑换记录</h3>
-                  {data.redemptions.length ? (
-                    data.redemptions.slice(0, 10).map((r) => (
-                      <div className="list-row" key={r.id}>
-                        <Tile icon={r.icon} />
-                        <div>
-                          <strong>{r.title}</strong>
-                          <p>
-                            {r.cost} 星 · {timeText(r.created_at)}
-                            {r.review_note && ` · ${r.review_note}`}
-                          </p>
-                        </div>
-                        <span className={`tag ${r.status}`}>
-                          {r.status === 'pending'
-                            ? '等待确认'
-                            : r.status === 'approved'
-                              ? '兑换成功'
-                              : '已退回'}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="muted">还没有兑换记录，先来积攒小星星吧。</p>
-                  )}
-                </div>
-              </section>
+              <WishShop
+                data={data}
+                isParent={isParent}
+                busy={busy}
+                online={online}
+                filter={rewardFilter}
+                onFilter={setRewardFilter}
+                onCreate={() => setDialog({ type: 'reward' })}
+                onEdit={(reward) => setDialog({ type: 'reward', reward })}
+                onRedeem={(reward) => setDialog({ type: 'redeem', reward })}
+                onHistory={() => setDialog({ type: 'wish-history' })}
+                onReview={() => setPage('review')}
+                onToggle={(r) =>
+                  act(
+                    () =>
+                      api(`/api/rewards/${r.id}`, 'PATCH', {
+                        title: r.title,
+                        description: r.description,
+                        icon: r.icon,
+                        cost: r.cost,
+                        active: !r.active,
+                      }),
+                    r.active ? '奖励已下架' : '奖励已上架',
+                  )
+                }
+              />
             )}
             {page === 'review' && isParent && (
               <section>
@@ -1578,15 +1441,17 @@ export default function App() {
                       : '添加奖励'
                     : dialog.type === 'redeem'
                       ? '兑换一个小心愿'
-                      : dialog.type === 'entry'
-                        ? '记一笔星星'
-                        : dialog.type === 'reverse'
-                          ? '撤销这笔流水'
-                          : dialog.type === 'settings'
-                            ? '账号与设置'
-                            : dialog.type === 'nfc-help'
-                              ? '实体任务卡'
-                              : dialog.title
+                      : dialog.type === 'wish-history'
+                        ? '兑换记录'
+                        : dialog.type === 'entry'
+                          ? '记一笔星星'
+                          : dialog.type === 'reverse'
+                            ? '撤销这笔流水'
+                            : dialog.type === 'settings'
+                              ? '账号与设置'
+                              : dialog.type === 'nfc-help'
+                                ? '实体任务卡'
+                                : dialog.title
             }
             close={() => {
               if (!busy) setDialog(null);
@@ -1645,16 +1510,38 @@ export default function App() {
                 }}
               />
             )}
+            {dialog.type === 'wish-history' && (
+              <WishHistory redemptions={data?.redemptions || []} />
+            )}
             {dialog.type === 'redeem' && (
-              <div className="redeem-confirm">
-                <Tile icon={dialog.reward.icon} size="large" />
-                <h3>{dialog.reward.title}</h3>
-                <p>
-                  家长确认后会消耗 <b>{dialog.reward.cost}</b> 颗星星。
-                </p>
-                <p className="muted">
-                  当前余额 {data?.wallet.balance} 星，确认后剩余{' '}
-                  {(data?.wallet.balance || 0) - dialog.reward.cost} 星。
+              <div className="redeem-confirm wish-redeem">
+                <div className="wish-redeem-heading">
+                  <WishIcon icon={dialog.reward.icon} />
+                  <div>
+                    <h3>{dialog.reward.title}</h3>
+                    <p>{dialog.reward.description || '一份值得期待的小心愿'}</p>
+                  </div>
+                </div>
+                <div className="wish-receipt">
+                  <span>
+                    兑换所需
+                    <strong>
+                      <StarIcon size={20} />
+                      {dialog.reward.cost}
+                      <small>星</small>
+                    </strong>
+                  </span>
+                  <span>
+                    兑换后剩余
+                    <strong>
+                      {(data?.wallet.balance || 0) - dialog.reward.cost}
+                      <small>星</small>
+                    </strong>
+                  </span>
+                </div>
+                <p className="wish-redeem-note">
+                  <ShieldCheck size={16} />
+                  家长确认后才会扣星，提交申请时不扣除。
                 </p>
                 <Button
                   className="primary full"
@@ -1676,6 +1563,7 @@ export default function App() {
                     }
                   }}
                 >
+                  <Gift size={18} />
                   请家长帮我兑换
                 </Button>
               </div>
@@ -2345,8 +2233,10 @@ function RewardForm({
   busy: boolean;
   save: (v: unknown) => void;
 }) {
+  const [selectedIcon, setSelectedIcon] = useState(reward?.icon || 'gift');
   return (
     <form
+      className="wish-form"
       onSubmit={(e) => {
         e.preventDefault();
         const f = new FormData(e.currentTarget);
@@ -2360,43 +2250,59 @@ function RewardForm({
       }}
     >
       <Field label="奖励名称">
-        <input name="title" defaultValue={reward?.title} required maxLength={100} />
+        <input
+          name="title"
+          defaultValue={reward?.title}
+          placeholder="例如：周末一起去野餐"
+          required
+          maxLength={100}
+        />
       </Field>
       <Field label="奖励说明">
-        <textarea name="description" defaultValue={reward?.description} maxLength={1000} />
+        <textarea
+          name="description"
+          defaultValue={reward?.description}
+          placeholder="约定好内容，让小期待更具体"
+          rows={2}
+          maxLength={1000}
+        />
       </Field>
-      <div className="form-row">
-        <Field label="兑换所需星星">
-          <input
-            type="number"
-            name="cost"
-            min={1}
-            max={100000}
-            defaultValue={reward?.cost || 5}
-            required
-          />
-        </Field>
-        <Field label="图标">
-          <select name="icon" defaultValue={reward?.icon || 'gift'}>
-            {Object.entries({
-              icecream: '冰淇淋',
-              toy: '玩具',
-              movie: '电影',
-              picnic: '野餐',
-              gift: '礼物',
-            }).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-      <label className="check-field">
+      <Field label="兑换所需星星">
+        <input
+          type="number"
+          name="cost"
+          min={1}
+          max={100000}
+          defaultValue={reward?.cost || 5}
+          required
+        />
+      </Field>
+      <fieldset className="wish-icon-picker">
+        <legend>选择心愿图标</legend>
+        <div>
+          {Object.entries(wishIcons).map(([key, option]) => (
+            <label key={key} className={selectedIcon === key ? 'chosen' : ''}>
+              <input
+                type="radio"
+                name="icon"
+                value={key}
+                checked={selectedIcon === key}
+                onChange={() => setSelectedIcon(key)}
+              />
+              <WishIcon icon={key} />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <label className="check-field wish-active-field">
         <input type="checkbox" name="active" defaultChecked={reward ? !!reward.active : true} />{' '}
-        在奖励小铺上架
+        <span>
+          在心愿小铺上架<small>家人共享，孩子可以申请兑换</small>
+        </span>
       </label>
       <Button className="primary full" loading={busy}>
+        <Check size={18} />
         保存奖励
       </Button>
     </form>
